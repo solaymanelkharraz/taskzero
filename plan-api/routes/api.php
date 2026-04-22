@@ -1,0 +1,30 @@
+<?php
+
+use App\Http\Controllers\Api\IdeaController;
+use App\Http\Controllers\Api\ProjectController;
+use App\Http\Controllers\Api\SweepController;
+use App\Http\Controllers\Api\TaskController;
+use App\Http\Controllers\Api\WeekController;
+use Illuminate\Support\Facades\Route;
+
+// ── Tasks ────────────────────────────────────────────────────
+Route::get('/tasks',              [TaskController::class, 'index']);
+Route::post('/tasks',             [TaskController::class, 'store']);
+Route::put('/tasks/{id}',         [TaskController::class, 'update']);
+Route::patch('/tasks/{id}/cycle', [TaskController::class, 'cycle']);
+Route::delete('/tasks/{id}',      [TaskController::class, 'destroy']);
+
+// ── Projects ─────────────────────────────────────────────────
+Route::get('/projects',          [ProjectController::class, 'index']);
+Route::post('/projects',         [ProjectController::class, 'store']);
+Route::delete('/projects/{id}',  [ProjectController::class, 'destroy']);
+
+// ── Ideas (Brain Dump) ───────────────────────────────────────
+Route::get('/ideas',                     [IdeaController::class, 'index']);
+Route::post('/ideas',                    [IdeaController::class, 'store']);
+Route::post('/ideas/{id}/convert',       [IdeaController::class, 'convert']);
+Route::delete('/ideas/{id}',             [IdeaController::class, 'destroy']);
+
+// ── Misc ─────────────────────────────────────────────────────
+Route::get('/week',   [WeekController::class, 'index']);
+Route::post('/sweep', SweepController::class);
