@@ -81,6 +81,15 @@ class TaskController extends Controller
     }
 
     /**
+     * GET /api/tasks/{id}
+     */
+    public function show(int $id): JsonResponse
+    {
+        $task = Task::with('project')->findOrFail($id);
+        return response()->json($this->format($task));
+    }
+
+    /**
      * PATCH /api/tasks/{id}/cycle  — todo→in_progress→done→todo
      */
     public function cycle(int $id): JsonResponse
@@ -93,7 +102,14 @@ class TaskController extends Controller
             default       => 'todo',
         };
 
-        $task->update(['status' => $next]);
+        $updateData = ['status' => $next];
+        
+        // Auto-route to Today if moved to In Progress
+        if ($next === 'in_progress') {
+            $updateData['assigned_date'] = Carbon::today()->toDateString();
+        }
+
+        $task->update($updateData);
 
         return response()->json($this->format($task->fresh('project')));
     }

@@ -1,5 +1,6 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getTasks, createTask, updateTask, deleteTask, getProjects, createProject, deleteProject, getWeek } from '../api/client'
 import TaskCard from '../components/TaskCard'
 import Modal from '../components/Modal'
@@ -7,93 +8,133 @@ import Modal from '../components/Modal'
 const today = new Date().toISOString().split('T')[0]
 
 export default function Dashboard() {
-  const [backlog,   setBacklog]   = useState([])
-  const [projects,  setProjects]  = useState([])
-  const [week,      setWeek]      = useState([])
-  const [weekTasks, setWeekTasks] = useState({})
+  const queryClient = useQueryClient()
   const [selPid,    setSelPid]    = useState(null)
-  const [projTasks, setProjTasks] = useState([])
-
   const [addTaskOpen, setAddTaskOpen] = useState(false)
   const [addProjOpen, setAddProjOpen] = useState(false)
   const [editTask,    setEditTask]    = useState(null)
-  const [prefillDate, setPrefillDate] = useState('')
 
   const [taskForm, setTaskForm] = useState({ title: '', assigned_date: '', project_id: '' })
   const [projForm, setProjForm] = useState({ name: '', description: '' })
 
-  const load = useCallback(async () => {
-    const [bl, pr, wk] = await Promise.all([
-      getTasks({ backlog: 1 }),
-      getProjects(),
-      getWeek(),
-    ])
-    setBacklog(bl.data)
-    setProjects(pr.data)
-    setWeek(wk.data)
+  const { data: backlog = [] } = useQuery({
+    queryKey: ['tasks', { backlog: 1 }],
+    queryFn: async () => (await getTasks({ backlog: 1 })).data
+  })
 
-    // Load each day's tasks
-    const promises = wk.data.map(d => getTasks({ date: d.date }).then(r => [d.date, r.data]))
-    const results  = await Promise.all(promises)
-    setWeekTasks(Object.fromEntries(results))
-  }, [])
+  const { data: projects = [] } = useQuery({
+    queryKey: ['projects'],
+    queryFn: async () => (await getProjects()).data
+  })
 
-  useEffect(() => { load() }, [load])
+  const { data: week = [] } = useQuery({
+    queryKey: ['week'],
+    queryFn: async () => (await getWeek()).data
+  })
 
-  useEffect(() => {
-    if (!selPid) { setProjTasks([]); return }
-    getTasks({ project_id: selPid }).then(r => setProjTasks(r.data))
-  }, [selPid])
+  const { data: weekTasks = {} } = useQuery({
+    queryKey: ['weekTasks', week.map(d => d.date)],
+    queryFn: async () => {
+      if (!week.length) return {}
+      const promises = week.map(d => getTasks({ date: d.date }).then(r => [d.date, r.data]))
+      const results = await Promise.all(promises)
+      return Object.fromEntries(results)
+    },
+    enabled: week.length > 0
+  })
+
+  const { data: projTasks = [] } = useQuery({
+    queryKey: ['tasks', { project_id: selPid }],
+    queryFn: async () => (await getTasks({ project_id: selPid })).data,
+    enabled: !!selPid
+  })
+
+  const invalidateAll = () => {
+    queryClient.invalidateQueries({ queryKey: ['tasks'] })
+    queryClient.invalidateQueries({ queryKey: ['projects'] })
+    queryClient.invalidateQueries({ queryKey: ['week'] })
+    queryClient.invalidateQueries({ queryKey: ['weekTasks'] })
+  }
 
   // ── Task CRUD ─────────────────────────────────────────────
-  const handleAddTask = async (e) => {
+  const addMut = useMutation({
+    mutationFn: createTask,
+    onSuccess: () => {
+      invalidateAll()
+      setAddTaskOpen(false)
+      setTaskForm({ title: '', assigned_date: '', project_id: '' })
+    }
+  })
+
+  const editMut = useMutation({
+    mutationFn: (data) => updateTask(data.id, data.payload),
+    onSuccess: () => {
+      invalidateAll()
+      setEditTask(null)
+    }
+  })
+
+  const delMut = useMutation({
+    mutationFn: deleteTask,
+    onSuccess: invalidateAll
+  })
+
+  const handleAddTask = (e) => {
     e.preventDefault()
-    await createTask({
+    addMut.mutate({
       title: taskForm.title,
       assigned_date: taskForm.assigned_date || null,
       project_id:    taskForm.project_id || null,
     })
-    setAddTaskOpen(false)
-    setTaskForm({ title: '', assigned_date: '', project_id: '' })
-    load()
   }
 
-  const handleEditTask = async (e) => {
+  const handleEditTask = (e) => {
     e.preventDefault()
-    await updateTask(editTask.id, {
-      title:         editTask.title,
-      status:        editTask.status,
-      assigned_date: editTask.assigned_date || null,
-      project_id:    editTask.project_id || null,
+    editMut.mutate({
+      id: editTask.id,
+      payload: {
+        title:         editTask.title,
+        status:        editTask.status,
+        assigned_date: editTask.assigned_date || null,
+        project_id:    editTask.project_id || null,
+      }
     })
-    setEditTask(null)
-    load()
   }
 
-  const handleDelete = async (id) => {
+  const handleDelete = (id) => {
     if (!confirm('Delete this task?')) return
-    await deleteTask(id)
-    load()
+    delMut.mutate(id)
   }
 
   // ── Project CRUD ──────────────────────────────────────────
-  const handleAddProject = async (e) => {
+  const addProjMut = useMutation({
+    mutationFn: createProject,
+    onSuccess: () => {
+      invalidateAll()
+      setAddProjOpen(false)
+      setProjForm({ name: '', description: '' })
+    }
+  })
+
+  const delProjMut = useMutation({
+    mutationFn: deleteProject,
+    onSuccess: (_, id) => {
+      invalidateAll()
+      if (selPid === id) setSelPid(null)
+    }
+  })
+
+  const handleAddProject = (e) => {
     e.preventDefault()
-    await createProject(projForm)
-    setAddProjOpen(false)
-    setProjForm({ name: '', description: '' })
-    load()
+    addProjMut.mutate(projForm)
   }
 
-  const handleDeleteProject = async (id) => {
+  const handleDeleteProject = (id) => {
     if (!confirm('Delete project and unlink its tasks?')) return
-    await deleteProject(id)
-    if (selPid === id) setSelPid(null)
-    load()
+    delProjMut.mutate(id)
   }
 
   const openAddTask = (date = '') => {
-    setPrefillDate(date)
     setTaskForm({ title: '', assigned_date: date, project_id: '' })
     setAddTaskOpen(true)
   }
@@ -257,8 +298,8 @@ export default function Dashboard() {
             {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
           <div className="flex gap-2 justify-end">
-            <button type="button" onClick={() => setAddTaskOpen(false)} className="px-4 py-2 text-sm text-[var(--text-dim)]">Cancel</button>
-            <motion.button whileTap={{ scale: 0.95 }} type="submit"
+            <button type="button" onClick={() => setAddTaskOpen(false)} className="px-4 py-2 text-sm text-[var(--text-dim)] hover:text-[var(--text)] transition-colors">Cancel</button>
+            <motion.button whileTap={{ scale: 0.95 }} type="submit" disabled={addMut.isPending}
               className="px-5 py-2 bg-[var(--purple-d)] hover:bg-[var(--purple)] text-white text-sm font-semibold rounded-xl transition-colors">
               Add Task
             </motion.button>
@@ -271,7 +312,14 @@ export default function Dashboard() {
         {editTask && (
           <form onSubmit={handleEditTask} className="flex flex-col gap-4">
             <input required value={editTask.title} onChange={e => setEditTask(t => ({ ...t, title: e.target.value }))} className={inp} />
-            <select value={editTask.status} onChange={e => setEditTask(t => ({ ...t, status: e.target.value }))} className={inp}>
+            <select value={editTask.status} onChange={e => {
+                const newStatus = e.target.value
+                setEditTask(t => ({ 
+                  ...t, 
+                  status: newStatus,
+                  assigned_date: newStatus === 'in_progress' ? today : t.assigned_date
+                }))
+              }} className={inp}>
               <option value="todo">To Do</option>
               <option value="in_progress">In Progress</option>
               <option value="done">Done</option>
@@ -282,8 +330,8 @@ export default function Dashboard() {
               {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
             <div className="flex gap-2 justify-end">
-              <button type="button" onClick={() => setEditTask(null)} className="px-4 py-2 text-sm text-[var(--text-dim)]">Cancel</button>
-              <motion.button whileTap={{ scale: 0.95 }} type="submit"
+              <button type="button" onClick={() => setEditTask(null)} className="px-4 py-2 text-sm text-[var(--text-dim)] hover:text-[var(--text)] transition-colors">Cancel</button>
+              <motion.button whileTap={{ scale: 0.95 }} type="submit" disabled={editMut.isPending}
                 className="px-5 py-2 bg-[var(--purple-d)] hover:bg-[var(--purple)] text-white text-sm font-semibold rounded-xl transition-colors">
                 Save
               </motion.button>
@@ -301,8 +349,8 @@ export default function Dashboard() {
             onChange={e => setProjForm(f => ({ ...f, description: e.target.value }))}
             className={inp + ' resize-none'} />
           <div className="flex gap-2 justify-end">
-            <button type="button" onClick={() => setAddProjOpen(false)} className="px-4 py-2 text-sm text-[var(--text-dim)]">Cancel</button>
-            <motion.button whileTap={{ scale: 0.95 }} type="submit"
+            <button type="button" onClick={() => setAddProjOpen(false)} className="px-4 py-2 text-sm text-[var(--text-dim)] hover:text-[var(--text)] transition-colors">Cancel</button>
+            <motion.button whileTap={{ scale: 0.95 }} type="submit" disabled={addProjMut.isPending}
               className="px-5 py-2 bg-[var(--purple-d)] hover:bg-[var(--purple)] text-white text-sm font-semibold rounded-xl transition-colors">
               Create
             </motion.button>

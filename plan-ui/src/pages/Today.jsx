@@ -1,5 +1,6 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getTasks, cycleTask, deleteTask, createTask, updateTask, getProjects, runSweep } from '../api/client'
 import StatsRow from '../components/StatsRow'
 import TaskCard from '../components/TaskCard'
@@ -15,51 +16,81 @@ function fmt(d) {
 }
 
 export default function Today() {
-  const [tasks,    setTasks]    = useState([])
-  const [projects, setProjects] = useState([])
+  const queryClient = useQueryClient()
   const [swept,    setSwept]    = useState(null)
   const [addOpen,  setAddOpen]  = useState(false)
   const [editTask, setEditTask] = useState(null)
   const [form,     setForm]     = useState({ title: '', project_id: '' })
 
-  const load = useCallback(async () => {
-    const [tr, pr] = await Promise.all([
-      getTasks({ date: today }),
-      getProjects(),
-    ])
-    setTasks(tr.data)
-    setProjects(pr.data)
-  }, [])
+  const { data: tasks = [] } = useQuery({
+    queryKey: ['tasks', { date: today }],
+    queryFn: async () => (await getTasks({ date: today })).data
+  })
+
+  const { data: projects = [] } = useQuery({
+    queryKey: ['projects'],
+    queryFn: async () => (await getProjects()).data
+  })
 
   useEffect(() => {
-    runSweep().then(r => { if (r.data.swept > 0) setSwept(r.data.swept) })
-    load()
-  }, [load])
+    runSweep().then(r => { 
+      if (r.data.swept > 0) {
+        setSwept(r.data.swept)
+        queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      }
+    })
+  }, [queryClient])
 
-  const handleCycle = async (id) => {
-    const r = await cycleTask(id)
-    setTasks(prev => prev.map(t => t.id === id ? r.data : t))
-  }
+  const cycleMut = useMutation({
+    mutationFn: cycleTask,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tasks'] })
+  })
 
-  const handleDelete = async (id) => {
+  const deleteMut = useMutation({
+    mutationFn: deleteTask,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tasks'] })
+  })
+
+  const addMut = useMutation({
+    mutationFn: createTask,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      setAddOpen(false)
+      setForm({ title: '', project_id: '' })
+    }
+  })
+
+  const editMut = useMutation({
+    mutationFn: (data) => updateTask(data.id, data.payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      setEditTask(null)
+    }
+  })
+
+  const handleCycle = (id) => cycleMut.mutate(id)
+
+  const handleDelete = (id) => {
     if (!confirm('Delete this task?')) return
-    await deleteTask(id)
-    setTasks(prev => prev.filter(t => t.id !== id))
+    deleteMut.mutate(id)
   }
 
-  const handleAdd = async (e) => {
+  const handleAdd = (e) => {
     e.preventDefault()
-    await createTask({ ...form, assigned_date: today })
-    setAddOpen(false)
-    setForm({ title: '', project_id: '' })
-    load()
+    addMut.mutate({ ...form, assigned_date: today })
   }
 
-  const handleEdit = async (e) => {
+  const handleEdit = (e) => {
     e.preventDefault()
-    await updateTask(editTask.id, { title: editTask.title, project_id: editTask.project_id || null, assigned_date: editTask.assigned_date, status: editTask.status })
-    setEditTask(null)
-    load()
+    editMut.mutate({ 
+      id: editTask.id, 
+      payload: { 
+        title: editTask.title, 
+        project_id: editTask.project_id || null, 
+        assigned_date: editTask.assigned_date, 
+        status: editTask.status 
+      } 
+    })
   }
 
   const total  = tasks.length
@@ -168,7 +199,7 @@ export default function Today() {
           </select>
           <div className="flex gap-2 justify-end">
             <button type="button" onClick={() => setAddOpen(false)} className="px-4 py-2 text-sm text-[var(--text-dim)] hover:text-[var(--text)] transition-colors">Cancel</button>
-            <motion.button whileTap={{ scale: 0.95 }} type="submit"
+            <motion.button whileTap={{ scale: 0.95 }} type="submit" disabled={addMut.isPending}
               className="px-5 py-2 bg-[var(--purple-d)] hover:bg-[var(--purple)] text-white text-sm font-semibold rounded-xl transition-colors">
               Add Task
             </motion.button>
@@ -183,7 +214,14 @@ export default function Today() {
             <input required value={editTask.title} onChange={e => setEditTask(t => ({ ...t, title: e.target.value }))}
               className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-xl px-4 py-2.5
                          text-sm text-[var(--text)] focus:outline-none focus:border-[var(--purple)]" />
-            <select value={editTask.status} onChange={e => setEditTask(t => ({ ...t, status: e.target.value }))}
+            <select value={editTask.status} onChange={e => {
+                const newStatus = e.target.value
+                setEditTask(t => ({ 
+                  ...t, 
+                  status: newStatus,
+                  assigned_date: newStatus === 'in_progress' ? today : t.assigned_date
+                }))
+              }}
               className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-xl px-4 py-2.5 text-sm text-[var(--text)]">
               <option value="todo">To Do</option>
               <option value="in_progress">In Progress</option>
@@ -196,7 +234,7 @@ export default function Today() {
             </select>
             <div className="flex gap-2 justify-end">
               <button type="button" onClick={() => setEditTask(null)} className="px-4 py-2 text-sm text-[var(--text-dim)] hover:text-[var(--text)] transition-colors">Cancel</button>
-              <motion.button whileTap={{ scale: 0.95 }} type="submit"
+              <motion.button whileTap={{ scale: 0.95 }} type="submit" disabled={editMut.isPending}
                 className="px-5 py-2 bg-[var(--purple-d)] hover:bg-[var(--purple)] text-white text-sm font-semibold rounded-xl transition-colors">
                 Save
               </motion.button>
