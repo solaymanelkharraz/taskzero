@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { API_BASE } from '../lib/api'
 import { motion } from 'framer-motion'
 
 export default function History() {
   const { data: tasks } = useQuery({ 
     queryKey: ['tasks'],
-    queryFn: () => fetch('http://127.0.0.1:8000/api/tasks').then(res => res.json())
+    queryFn: () => fetch(`${API_BASE}/tasks`).then(res => res.json())
   });
   
   const [search, setSearch] = useState('');

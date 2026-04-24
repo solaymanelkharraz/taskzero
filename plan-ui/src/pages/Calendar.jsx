@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { API_BASE } from '../lib/api'
 import { motion, AnimatePresence } from 'framer-motion'
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDay, isSameDay, addMonths, subMonths } from 'date-fns'
 
@@ -13,12 +14,12 @@ export default function Calendar() {
 
   const { data: tasks } = useQuery({ 
     queryKey: ['tasks'],
-    queryFn: () => fetch('http://127.0.0.1:8000/api/tasks').then(res => res.json())
+    queryFn: () => fetch(`${API_BASE}/tasks`).then(res => res.json())
   });
-  const { data: events } = useQuery({ queryKey: ['events'], queryFn: () => fetch('http://127.0.0.1:8000/api/events').then(res => res.json()) });
+  const { data: events } = useQuery({ queryKey: ['events'], queryFn: () => fetch(`${API_BASE}/events`).then(res => res.json()) });
 
   const createTask = useMutation({
-    mutationFn: (data) => fetch('http://127.0.0.1:8000/api/tasks', {
+    mutationFn: (data) => fetch(`${API_BASE}/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
@@ -30,7 +31,7 @@ export default function Calendar() {
   });
 
   const createEvent = useMutation({
-    mutationFn: (data) => fetch('http://127.0.0.1:8000/api/events', {
+    mutationFn: (data) => fetch(`${API_BASE}/events`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
