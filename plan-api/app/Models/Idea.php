@@ -11,5 +11,10 @@ class Idea extends Model
      */
     const UPDATED_AT = null;
 
-    protected $fillable = ['content'];
+    protected $fillable = ['content', 'category_id'];
+
+    public function category()
+    {
+        return $this->belongsTo(IdeaCategory::class, 'category_id');
+    }
 }

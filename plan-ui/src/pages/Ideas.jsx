@@ -1,164 +1,403 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { getIdeas, createIdea, deleteIdea, convertIdea, getProjects } from '../api/client'
-import Modal from '../components/Modal'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
+import { API_BASE } from '../lib/api'
 
 export default function Ideas() {
-  const [ideas,    setIdeas]    = useState([])
-  const [projects, setProjects] = useState([])
-  const [content,  setContent]  = useState('')
-  const [saving,   setSaving]   = useState(false)
-  const [cvt,      setCvt]      = useState(null) // idea being converted
-  const [cvtForm,  setCvtForm]  = useState({ title: '', assigned_date: '', project_id: '' })
+  const queryClient = useQueryClient();
+  const [content, setContent] = useState('');
+  const [categoryId, setCategoryId] = useState('');
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [filterCategory, setFilterCategory] = useState('All');
+  
+  const [editingIdea, setEditingIdea] = useState(null);
+  const [convertingIdea, setConvertingIdea] = useState(null);
 
-  const inp = 'w-full bg-[var(--surface)] border border-[var(--border)] rounded-xl px-4 py-2.5 text-sm text-[var(--text)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--purple)] transition-colors'
+  const { data: ideas } = useQuery({ 
+    queryKey: ['ideas'],
+    queryFn: () => fetch(`${API_BASE}/ideas`).then(res => res.json())
+  });
+  const { data: categories } = useQuery({ 
+    queryKey: ['idea-categories'],
+    queryFn: () => fetch(`${API_BASE}/idea-categories`).then(res => res.json())
+  });
 
-  const load = useCallback(async () => {
-    const [ir, pr] = await Promise.all([getIdeas(), getProjects()])
-    setIdeas(ir.data)
-    setProjects(pr.data)
-  }, [])
-
-  useEffect(() => { load() }, [load])
-
-  const handleCapture = async (e) => {
-    e.preventDefault()
-    if (!content.trim()) return
-    setSaving(true)
-    try {
-      await createIdea({ content: content.trim() })
-      setContent('')
-      load()
-    } finally {
-      setSaving(false)
+  const createIdea = useMutation({
+    mutationFn: (data) => fetch(`${API_BASE}/ideas`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    }).then(res => res.json()),
+    onSuccess: () => {
+      setContent('');
+      toast.success('Idea captured.');
+      queryClient.invalidateQueries({ queryKey: ['ideas'] });
     }
-  }
+  });
 
-  const handleDelete = async (id) => {
-    if (!confirm('Delete this idea?')) return
-    await deleteIdea(id)
-    setIdeas(prev => prev.filter(i => i.id !== id))
-  }
+  const updateIdea = useMutation({
+    mutationFn: ({ id, data }) => fetch(`${API_BASE}/ideas/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    }).then(res => res.json()),
+    onMutate: async ({ id, data }) => {
+      await queryClient.cancelQueries({ queryKey: ['ideas'] });
+      const previous = queryClient.getQueryData(['ideas']);
+      queryClient.setQueryData(['ideas'], (old) => 
+        old?.map(i => i.id === id ? { ...i, ...data } : i)
+      );
+      setEditingIdea(null);
+      toast.success('Idea updated.');
+      return { previous };
+    },
+    onError: (err, variables, context) => {
+      queryClient.setQueryData(['ideas'], context.previous);
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['ideas'] })
+  });
 
-  const openConvert = (idea) => {
-    setCvt(idea)
-    setCvtForm({ title: idea.content.slice(0, 120), assigned_date: '', project_id: '' })
-  }
+  const deleteIdea = useMutation({
+    mutationFn: (id) => fetch(`${API_BASE}/ideas/${id}`, { method: 'DELETE' }),
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: ['ideas'] });
+      const previous = queryClient.getQueryData(['ideas']);
+      queryClient.setQueryData(['ideas'], (old) => old?.filter(i => i.id !== id));
+      toast.info('Idea deleted.');
+      return { previous };
+    },
+    onError: (err, variables, context) => {
+      queryClient.setQueryData(['ideas'], context.previous);
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['ideas'] })
+  });
 
-  const handleConvert = async (e) => {
-    e.preventDefault()
-    await convertIdea(cvt.id, {
-      title:         cvtForm.title,
-      assigned_date: cvtForm.assigned_date || null,
-      project_id:    cvtForm.project_id || null,
-    })
-    setCvt(null)
-    load()
-  }
+  const createCategory = useMutation({
+    mutationFn: (name) => fetch(`${API_BASE}/idea-categories`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    }).then(res => res.json()),
+    onSuccess: () => {
+      setNewCategoryName('');
+      toast.success('Category created.');
+      queryClient.invalidateQueries({ queryKey: ['idea-categories'] });
+    }
+  });
+
+  const convertIdea = useMutation({
+    mutationFn: ({ id, data }) => fetch(`${API_BASE}/ideas/${id}/convert`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    }).then(res => res.json()),
+    onSuccess: () => {
+      setConvertingIdea(null);
+      toast.success('Idea converted to task!', {
+        description: 'You can find it in your backlog.',
+      });
+      queryClient.invalidateQueries({ queryKey: ['ideas'] });
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+    }
+  });
+
+  const handleCapture = (e) => {
+    e.preventDefault();
+    if (!content.trim()) return;
+    createIdea.mutate({ 
+      content: content.trim(), 
+      category_id: categoryId ? parseInt(categoryId) : null 
+    });
+  };
+
+  const handleCreateCategory = (e) => {
+    e.preventDefault();
+    if (!newCategoryName.trim()) return;
+    createCategory.mutate(newCategoryName.trim());
+  };
+
+  const filteredIdeas = (ideas || []).filter(idea => {
+    if (filterCategory === 'All') return true;
+    if (filterCategory === 'Uncategorized') return !idea.category_id;
+    return idea.category_id === filterCategory;
+  });
 
   return (
-    <div className="max-w-2xl mx-auto py-8 px-4">
+    <div className="max-w-5xl mx-auto py-10 px-6 space-y-8 relative">
       {/* Header */}
-      <div className="flex items-start justify-between mb-8 gap-4 flex-wrap">
+      <div className="flex items-start justify-between flex-wrap gap-4 border-b border-slate-800 pb-6">
         <div>
-          <div className="text-xs text-[var(--purple)] font-semibold uppercase tracking-widest mb-1">💡 Brain Dump</div>
-          <h1 className="text-3xl font-bold">Ideas</h1>
-          <p className="text-[var(--text-dim)] text-sm mt-1">Raw thoughts. No judgement. Convert the good ones.</p>
-        </div>
-        <div className="bg-[var(--surface2)] border border-[var(--border)] rounded-2xl px-5 py-3 text-center shrink-0">
-          <div className="text-2xl font-bold text-[var(--purple)]">{ideas.length}</div>
-          <div className="text-xs text-[var(--text-dim)] uppercase tracking-wider">Ideas</div>
+          <h1 className="text-4xl font-black text-white">Ideas</h1>
+          <p className="text-slate-400 mt-2">Raw thoughts. Filter and convert.</p>
         </div>
       </div>
 
-      {/* Capture form */}
-      <div className="bg-[var(--surface2)] border border-[var(--border)] rounded-2xl p-5 mb-6">
-        <div className="font-semibold text-sm mb-3 flex items-center gap-2">
-          <span className="text-[var(--purple)]">+</span> New Idea
-        </div>
-        <form onSubmit={handleCapture} className="flex gap-2">
-          <input type="text" value={content} onChange={e => setContent(e.target.value)}
-            placeholder="Type your idea here — don't overthink it"
-            className={inp + ' flex-1'} />
-          <motion.button whileTap={{ scale: 0.95 }} type="submit" disabled={saving}
-            className="px-5 py-2.5 bg-[var(--purple-d)] hover:bg-[var(--purple)] text-white text-sm font-semibold rounded-xl transition-colors disabled:opacity-50 shrink-0">
-            {saving ? '…' : 'Save'}
-          </motion.button>
-        </form>
-      </div>
-
-      {/* Ideas grid */}
-      {ideas.length === 0 ? (
-        <div className="text-center py-16">
-          <div className="text-5xl mb-3">💡</div>
-          <div className="font-semibold text-[var(--text-dim)]">Brain Dump is empty</div>
-          <div className="text-xs text-[var(--text-dim)] mt-1">Use Quick Capture on Today page or the form above.</div>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <AnimatePresence mode="popLayout">
-            {ideas.map((idea, i) => (
-              <motion.div
-                key={idea.id}
-                layout
-                initial={{ opacity: 0, scale: 0.92, y: 16 }}
-                animate={{ opacity: 1, scale: 1,    y: 0 }}
-                exit={{ opacity: 0, scale: 0.88, x: -20 }}
-                transition={{ delay: i * 0.04, type: 'spring', stiffness: 280, damping: 25 }}
-                className="bg-[var(--surface2)] border border-[var(--border)] rounded-2xl p-4 flex flex-col gap-3 hover:border-[var(--purple-d)] transition-colors"
+      <div className="grid grid-cols-1 md:grid-cols-[300px_1fr] gap-8">
+        {/* Sidebar Controls */}
+        <div className="space-y-6">
+          <div className="bg-slate-800 border border-slate-700 rounded-2xl p-5 shadow-xl">
+            <h2 className="font-bold text-white mb-4">Add Idea</h2>
+            <form onSubmit={handleCapture} className="flex flex-col gap-3">
+              <textarea 
+                value={content} 
+                onChange={e => setContent(e.target.value)}
+                placeholder="What's on your mind?"
+                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500 h-24 resize-none transition-all" 
+              />
+              <select 
+                value={categoryId} 
+                onChange={e => setCategoryId(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500 transition-all"
               >
-                <p className="text-sm text-[var(--text)] leading-relaxed flex-1 whitespace-pre-wrap">
-                  {idea.content}
-                </p>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-[var(--text-dim)]">
-                    🕐 {new Date(idea.created_at).toLocaleString('en-GB', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                  <div className="flex gap-1">
-                    <motion.button whileTap={{ scale: 0.9 }} onClick={() => openConvert(idea)}
-                      className="p-1.5 rounded-lg bg-green-500/10 hover:bg-green-500/20 text-green-400 text-xs transition-colors"
-                      title="Convert to task">↗ Task</motion.button>
-                    <motion.button whileTap={{ scale: 0.9 }} onClick={() => handleDelete(idea.id)}
-                      className="p-1.5 rounded-lg hover:bg-red-500/10 text-[var(--text-dim)] hover:text-red-400 text-xs transition-colors"
-                      title="Delete">🗑</motion.button>
-                  </div>
-                </div>
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        </div>
-      )}
+                <option value="">Uncategorized</option>
+                {categories?.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+              <button 
+                type="submit" 
+                disabled={!content.trim() || createIdea.isPending}
+                className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-blue-900/20 disabled:opacity-50"
+              >
+                Save Idea
+              </button>
+            </form>
+          </div>
 
-      {/* Convert Modal */}
-      <Modal open={!!cvt} onClose={() => setCvt(null)} title="↗ Convert to Task">
-        {cvt && (
-          <form onSubmit={handleConvert} className="flex flex-col gap-4">
-            {/* Idea preview */}
-            <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl px-4 py-3">
-              <div className="text-xs text-[var(--text-dim)] uppercase tracking-wider mb-1">Original Idea</div>
-              <p className="text-sm text-[var(--text-dim)] leading-relaxed">{cvt.content}</p>
+          <div className="bg-slate-800 border border-slate-700 rounded-2xl p-5 shadow-xl">
+            <h2 className="font-bold text-white mb-4">Manage Categories</h2>
+            <form onSubmit={handleCreateCategory} className="flex flex-col gap-3 mb-6">
+              <input 
+                type="text" 
+                value={newCategoryName} 
+                onChange={e => setNewCategoryName(e.target.value)}
+                placeholder="New Category Name..."
+                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500 transition-all"
+              />
+              <button 
+                type="submit" 
+                disabled={!newCategoryName.trim() || createCategory.isPending}
+                className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-all disabled:opacity-50 text-sm"
+              >
+                + Add Category
+              </button>
+            </form>
+
+            <h3 className="font-bold text-slate-400 text-xs uppercase mb-3 tracking-wider">Filters</h3>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => setFilterCategory('All')}
+                className={`text-left px-4 py-2 rounded-lg text-sm font-medium transition-colors ${filterCategory === 'All' ? 'bg-blue-500/20 text-blue-400' : 'text-slate-400 hover:bg-slate-700 hover:text-white'}`}
+              >
+                All Ideas
+              </button>
+              <button
+                onClick={() => setFilterCategory('Uncategorized')}
+                className={`text-left px-4 py-2 rounded-lg text-sm font-medium transition-colors ${filterCategory === 'Uncategorized' ? 'bg-blue-500/20 text-blue-400' : 'text-slate-400 hover:bg-slate-700 hover:text-white'}`}
+              >
+                Uncategorized
+              </button>
+              {categories?.map(c => (
+                <button
+                  key={c.id}
+                  onClick={() => setFilterCategory(c.id)}
+                  className={`text-left px-4 py-2 rounded-lg text-sm font-medium transition-colors ${filterCategory === c.id ? 'bg-blue-500/20 text-blue-400' : 'text-slate-400 hover:bg-slate-700 hover:text-white'}`}
+                >
+                  {c.name}
+                </button>
+              ))}
             </div>
-            <input required placeholder="Make it actionable…" value={cvtForm.title}
-              onChange={e => setCvtForm(f => ({ ...f, title: e.target.value }))} className={inp} />
-            <input type="date" value={cvtForm.assigned_date}
-              onChange={e => setCvtForm(f => ({ ...f, assigned_date: e.target.value }))} className={inp} />
-            <select value={cvtForm.project_id} onChange={e => setCvtForm(f => ({ ...f, project_id: e.target.value }))} className={inp}>
-              <option value="">— Standalone —</option>
-              {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-            <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
-              ⚠ This idea will be permanently removed when converted.
+          </div>
+        </div>
+
+        {/* Ideas Grid */}
+        <div className="space-y-4">
+          {filteredIdeas.length === 0 ? (
+            <div className="text-center py-16 border-2 border-dashed border-slate-700 rounded-2xl bg-slate-800/50">
+              <div className="text-4xl mb-3">💡</div>
+              <div className="font-semibold text-slate-400">No ideas found</div>
             </div>
-            <div className="flex gap-2 justify-end">
-              <button type="button" onClick={() => setCvt(null)} className="px-4 py-2 text-sm text-[var(--text-dim)]">Cancel</button>
-              <motion.button whileTap={{ scale: 0.95 }} type="submit"
-                className="px-5 py-2 bg-green-600 hover:bg-green-500 text-white text-sm font-semibold rounded-xl transition-colors">
-                Convert
-              </motion.button>
-            </div>
-          </form>
+          ) : (
+            <AnimatePresence mode="popLayout">
+              {filteredIdeas.map((idea) => (
+                <motion.div
+                  key={idea.id}
+                  layout
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="bg-slate-800 border border-slate-700 rounded-2xl p-5 flex flex-col gap-3 hover:border-blue-500/50 transition-colors shadow-lg"
+                >
+                  <div className="flex justify-between items-start mb-2">
+                    <span className="text-xs font-bold px-2 py-1 bg-slate-700 text-slate-300 rounded">
+                      {idea.category_name || 'Uncategorized'}
+                    </span>
+                    <div className="flex gap-4">
+                      <button 
+                        onClick={() => setConvertingIdea(idea)}
+                        className="text-slate-400 hover:text-emerald-400 transition-colors text-sm font-medium flex items-center gap-1"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                          <path d="M5 4a1 1 0 00-2 0v7.268a2 2 0 000 3.464V16a1 1 0 102 0v-1.268a2 2 0 000-3.464V4zM11 4a1 1 0 10-2 0v1.268a2 2 0 000 3.464V16a1 1 0 102 0V8.732a2 2 0 000-3.464V4zM16 3a1 1 0 011 1v7.268a2 2 0 010 3.464V16a1 1 0 11-2 0v-1.268a2 2 0 010-3.464V4a1 1 0 011-1z" />
+                        </svg>
+                        Convert
+                      </button>
+                      <button 
+                        onClick={() => setEditingIdea({ id: idea.id, content: idea.content, category_id: idea.category_id || '' })}
+                        className="text-slate-400 hover:text-blue-400 transition-colors text-sm font-medium"
+                      >
+                        Edit
+                      </button>
+                      <button 
+                        onClick={() => { if(confirm('Delete idea?')) deleteIdea.mutate(idea.id); }}
+                        className="text-slate-500 hover:text-red-400 transition-colors"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-sm text-slate-200 leading-relaxed whitespace-pre-wrap">
+                    {idea.content}
+                  </p>
+                  <div className="text-xs text-slate-500 mt-2">
+                    {new Date(idea.created_at).toLocaleString()}
+                  </div>
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          )}
+        </div>
+      </div>
+
+      {/* Convert Idea Modal */}
+      <AnimatePresence>
+        {convertingIdea && (
+          <motion.div 
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl"
+            >
+              <div className="p-6 border-b border-slate-800 flex justify-between items-center">
+                <h2 className="text-xl font-bold text-white">Convert to Task</h2>
+                <button onClick={() => setConvertingIdea(null)} className="text-slate-500 hover:text-white">✕</button>
+              </div>
+              <div className="p-6 space-y-4">
+                <div className="p-4 bg-slate-800 rounded-xl border border-slate-700 text-sm text-slate-300 italic">
+                  "{convertingIdea.content}"
+                </div>
+                <form 
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const formData = new FormData(e.target);
+                    convertIdea.mutate({ 
+                      id: convertingIdea.id, 
+                      data: { 
+                        title: formData.get('title'),
+                        assigned_date: formData.get('date') || null,
+                        project_id: formData.get('project') ? parseInt(formData.get('project')) : null
+                      } 
+                    });
+                  }}
+                  className="space-y-4"
+                >
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Task Title</label>
+                    <input 
+                      name="title"
+                      required
+                      defaultValue={convertingIdea.content}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Work Date</label>
+                      <input name="date" type="date" className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Project</label>
+                      <select name="project" className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500">
+                        <option value="">None</option>
+                        {queryClient.getQueryData(['projects'])?.map(p => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="pt-4 flex justify-end gap-3">
+                    <button type="button" onClick={() => setConvertingIdea(null)} className="px-5 py-2 text-slate-400 hover:text-white transition-colors">Cancel</button>
+                    <button type="submit" disabled={convertIdea.isPending} className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-emerald-900/20 disabled:opacity-50">Create Task</button>
+                  </div>
+                </form>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
-      </Modal>
+      </AnimatePresence>
+
+      {/* Edit Idea Modal */}
+      <AnimatePresence>
+        {editingIdea && (
+          <motion.div 
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl"
+            >
+              <div className="p-6 border-b border-slate-800 flex justify-between items-center">
+                <h2 className="text-xl font-bold text-white">Edit Idea</h2>
+                <button onClick={() => setEditingIdea(null)} className="text-slate-500 hover:text-white">✕</button>
+              </div>
+              <form 
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  updateIdea.mutate({ 
+                    id: editingIdea.id, 
+                    data: {
+                      content: editingIdea.content,
+                      category_id: editingIdea.category_id ? parseInt(editingIdea.category_id) : null
+                    }
+                  });
+                }}
+                className="p-6 space-y-4"
+              >
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Content</label>
+                  <textarea 
+                    required
+                    value={editingIdea.content}
+                    onChange={e => setEditingIdea({ ...editingIdea, content: e.target.value })}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500 h-32 resize-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Category</label>
+                  <select 
+                    value={editingIdea.category_id}
+                    onChange={e => setEditingIdea({ ...editingIdea, category_id: e.target.value })}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="">Uncategorized</option>
+                    {categories?.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="pt-4 flex justify-end gap-3">
+                  <button type="button" onClick={() => setEditingIdea(null)} className="px-5 py-2 text-slate-400 hover:text-white transition-colors">Cancel</button>
+                  <button type="submit" disabled={updateIdea.isPending || !editingIdea.content.trim()} className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all disabled:opacity-50">Save Changes</button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
-  )
+  );
 }

@@ -2,11 +2,13 @@ import { NavLink } from 'react-router-dom'
 import { motion } from 'framer-motion'
 
 const links = [
-  { to: '/',          icon: '⚡', label: 'Today' },
-  { to: '/dashboard', icon: '🗂️', label: 'Control Room' },
-  { to: '/ideas',     icon: '💡', label: 'Brain Dump' },
-  { to: '/calendar',  icon: '📅', label: 'Calendar' },
-  { to: '/history',   icon: '📜', label: 'History' },
+  { to: '/',             icon: '⚡', label: 'Today (Home)' },
+  { to: '/dashboard',    icon: '📊', label: 'Dashboard' },
+  { to: '/control-room', icon: '🗂️', label: 'Control Room' },
+  { to: '/ideas',        icon: '💡', label: 'Ideas' },
+  { to: '/habits',       icon: '🔄', label: 'Habits' },
+  { to: '/calendar',     icon: '📅', label: 'Calendar' },
+  { to: '/history',      icon: '📜', label: 'History' },
 ]
 
 export default function Sidebar() {
@@ -47,6 +49,16 @@ export default function Sidebar() {
           )}
         </NavLink>
       ))}
+      <div className="mt-auto px-3 py-6">
+        <div className="p-4 bg-slate-800/50 rounded-xl border border-slate-700/50 text-center">
+          <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Command Palette</div>
+          <div className="flex items-center justify-center gap-1.5">
+            <kbd className="bg-slate-900 px-1.5 py-0.5 rounded border border-slate-700 text-xs text-slate-400 font-sans shadow-sm">⌘</kbd>
+            <span className="text-slate-600">+</span>
+            <kbd className="bg-slate-900 px-1.5 py-0.5 rounded border border-slate-700 text-xs text-slate-400 font-sans shadow-sm">K</kbd>
+          </div>
+        </div>
+      </div>
     </aside>
   )
 }

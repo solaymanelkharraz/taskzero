@@ -1,163 +1,247 @@
 import { useState } from 'react'
-import { motion } from 'framer-motion'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getTasks, getProjects, createTask } from '../api/client'
-import Modal from '../components/Modal'
-
-function getDaysInMonth(year, month) {
-  return new Date(year, month + 1, 0).getDate()
-}
-
-function fmt(y, m, d) {
-  return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
-}
+import { motion, AnimatePresence } from 'framer-motion'
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDay, isSameDay, addMonths, subMonths } from 'date-fns'
 
 export default function Calendar() {
-  const queryClient = useQueryClient()
-  const now   = new Date()
-  const [year,  setYear]  = useState(now.getFullYear())
-  const [month, setMonth] = useState(now.getMonth())
-  const [addOpen, setAddOpen] = useState(false)
-  const [form, setForm] = useState({ title: '', assigned_date: '', project_id: '' })
+  const queryClient = useQueryClient();
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [addType, setAddType] = useState('task');
+  const [newEventName, setNewEventName] = useState('');
+  const [newEventCategory, setNewEventCategory] = useState('Travel');
 
-  const todayStr = fmt(now.getFullYear(), now.getMonth(), now.getDate())
-  const days     = getDaysInMonth(year, month)
-  const firstDow = new Date(year, month, 1).getDay() // 0=Sun
-
-  const { data: allTasks = [] } = useQuery({
+  const { data: tasks } = useQuery({ 
     queryKey: ['tasks'],
-    queryFn: async () => (await getTasks()).data
-  })
+    queryFn: () => fetch('http://127.0.0.1:8000/api/tasks').then(res => res.json())
+  });
+  const { data: events } = useQuery({ queryKey: ['events'], queryFn: () => fetch('http://127.0.0.1:8000/api/events').then(res => res.json()) });
 
-  const { data: projects = [] } = useQuery({
-    queryKey: ['projects'],
-    queryFn: async () => (await getProjects()).data
-  })
-
-  const addMut = useMutation({
-    mutationFn: createTask,
+  const createTask = useMutation({
+    mutationFn: (data) => fetch('http://127.0.0.1:8000/api/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    }).then(res => res.json()),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      queryClient.invalidateQueries({ queryKey: ['weekTasks'] })
-      setAddOpen(false)
-      setForm({ title: '', assigned_date: '', project_id: '' })
+      setNewTaskTitle('');
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
     }
-  })
+  });
 
-  const handleAdd = (e) => {
-    e.preventDefault()
-    addMut.mutate(form)
-  }
-
-  const openAddTask = (date) => {
-    setForm({ title: '', assigned_date: date, project_id: '' })
-    setAddOpen(true)
-  }
-
-  // Filter tasks for the current month view
-  const start = fmt(year, month, 1)
-  const end   = fmt(year, month, days)
-  const tasksByDate = {}
-  
-  allTasks.forEach(t => {
-    if (t.assigned_date >= start && t.assigned_date <= end) {
-      tasksByDate[t.assigned_date] = tasksByDate[t.assigned_date] ? [...tasksByDate[t.assigned_date], t] : [t]
+  const createEvent = useMutation({
+    mutationFn: (data) => fetch('http://127.0.0.1:8000/api/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    }).then(res => res.json()),
+    onSuccess: () => {
+      setNewEventName('');
+      queryClient.invalidateQueries({ queryKey: ['events'] });
     }
-  })
+  });
 
-  const monthLabel = new Date(year, month, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
+  const [currentMonth, setCurrentMonth] = useState(new Date());
 
-  const prev = () => { if (month === 0) { setYear(y => y - 1); setMonth(11) } else setMonth(m => m - 1) }
-  const next = () => { if (month === 11) { setYear(y => y + 1); setMonth(0) } else setMonth(m => m + 1) }
+  const today = new Date();
+  const monthStart = startOfMonth(currentMonth);
+  const monthEnd = endOfMonth(currentMonth);
+  const days = eachDayOfInterval({ start: monthStart, end: monthEnd });
+  const startOffset = getDay(monthStart);
 
-  const inp = 'w-full bg-[var(--surface)] border border-[var(--border)] rounded-xl px-4 py-2.5 text-sm text-[var(--text)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--purple)] transition-colors'
+  const eventIcons = {
+    'Travel': '✈️',
+    'Exam': '📝',
+    'Eid (عيد)': '🌙',
+    'Family': '👨‍👩‍👧‍👦',
+    'Football': '⚽'
+  };
 
   return (
-    <div className="max-w-2xl mx-auto py-8 px-4">
-      <div className="mb-6">
-        <div className="text-xs text-[var(--purple)] font-semibold uppercase tracking-widest mb-1">📅 Calendar</div>
-        <h1 className="text-3xl font-bold">Full Calendar</h1>
-      </div>
-
-      {/* Month nav */}
-      <div className="flex items-center justify-between mb-5">
-        <button onClick={prev} className="px-3 py-1.5 rounded-lg bg-[var(--surface2)] border border-[var(--border)] text-sm hover:border-[var(--purple-d)] transition-colors">‹ Prev</button>
-        <span className="font-semibold">{monthLabel}</span>
-        <button onClick={next} className="px-3 py-1.5 rounded-lg bg-[var(--surface2)] border border-[var(--border)] text-sm hover:border-[var(--purple-d)] transition-colors">Next ›</button>
-      </div>
-
-      {/* Day headers */}
-      <div className="grid grid-cols-7 gap-1 mb-1">
-        {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => (
-          <div key={d} className="text-center text-xs text-[var(--text-dim)] font-semibold py-1">{d}</div>
-        ))}
-      </div>
-
-      {/* Calendar grid */}
-      <div className="grid grid-cols-7 gap-1">
-        {/* Empty cells before first day */}
-        {Array.from({ length: firstDow }).map((_, i) => <div key={`empty-${i}`} />)}
-
-        {/* Day cells */}
-        {Array.from({ length: days }).map((_, i) => {
-          const day    = i + 1
-          const dateStr = fmt(year, month, day)
-          const dayTasks = tasksByDate[dateStr] ?? []
-          const isToday  = dateStr === todayStr
-
-          return (
-            <motion.div
-              key={day}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: i * 0.01 }}
-              onClick={() => openAddTask(dateStr)}
-              className={`rounded-xl border p-1.5 min-h-[70px] flex flex-col transition-all cursor-pointer hover:border-[var(--purple)] hover:shadow-[0_0_15px_rgba(168,85,247,0.15)]
-                ${isToday
-                  ? 'border-[var(--purple)] bg-[var(--purple-d)]/10'
-                  : 'border-[var(--border)] bg-[var(--surface2)]'
-                }`}
-            >
-              <div className={`text-xs font-bold mb-1 ${isToday ? 'text-[var(--purple)]' : 'text-[var(--text-dim)]'}`}>{day}</div>
-              <div className="flex flex-col gap-0.5">
-                {dayTasks.slice(0, 3).map(t => (
-                  <div key={t.id}
-                    className={`text-[10px] leading-tight px-1 py-0.5 rounded truncate
-                      ${t.status === 'done' ? 'bg-green-500/10 text-green-400'
-                        : t.status === 'in_progress' ? 'bg-amber-500/10 text-amber-400'
-                        : 'bg-[var(--purple-d)]/10 text-[var(--purple)]'
-                      }`}
-                  >{t.title}</div>
-                ))}
-                {dayTasks.length > 3 && (
-                  <div className="text-[9px] text-[var(--text-dim)]">+{dayTasks.length - 3} more</div>
-                )}
-              </div>
-            </motion.div>
-          )
-        })}
-      </div>
-
-      {/* Add Task Modal */}
-      <Modal open={addOpen} onClose={() => setAddOpen(false)} title="➕ New Task">
-        <form onSubmit={handleAdd} className="flex flex-col gap-4">
-          <input required placeholder="Task title…" value={form.title}
-            onChange={e => setForm(f => ({ ...f, title: e.target.value }))} className={inp} />
-          <input type="date" value={form.assigned_date}
-            onChange={e => setForm(f => ({ ...f, assigned_date: e.target.value }))} className={inp} />
-          <select value={form.project_id} onChange={e => setForm(f => ({ ...f, project_id: e.target.value }))} className={inp}>
-            <option value="">— Standalone —</option>
-            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-          <div className="flex gap-2 justify-end">
-            <button type="button" onClick={() => setAddOpen(false)} className="px-4 py-2 text-sm text-[var(--text-dim)] hover:text-[var(--text)] transition-colors">Cancel</button>
-            <motion.button whileTap={{ scale: 0.95 }} type="submit" disabled={addMut.isPending}
-              className="px-5 py-2 bg-[var(--purple-d)] hover:bg-[var(--purple)] text-white text-sm font-semibold rounded-xl transition-colors">
-              Add Task
-            </motion.button>
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="p-10 h-full flex flex-col">
+      <div className="flex justify-between items-end border-b border-slate-800 pb-6 mb-8">
+        <div>
+          <h1 className="text-4xl font-black text-white">Calendar</h1>
+          <div className="flex items-center gap-4 mt-2">
+            <button onClick={() => setCurrentMonth(subMonths(currentMonth, 1))} className="text-slate-400 hover:text-white px-2 py-1 bg-slate-800 rounded">←</button>
+            <p className="text-slate-200 font-bold w-32 text-center">{format(currentMonth, 'MMMM yyyy')}</p>
+            <button onClick={() => setCurrentMonth(addMonths(currentMonth, 1))} className="text-slate-400 hover:text-white px-2 py-1 bg-slate-800 rounded">→</button>
+            <button onClick={() => setCurrentMonth(new Date())} className="text-xs text-slate-500 hover:text-white ml-2">Today</button>
           </div>
-        </form>
-      </Modal>
-    </div>
-  )
+        </div>
+      </div>
+
+      <div className="flex-1 min-h-0 bg-slate-800 border border-slate-700 rounded-2xl p-4 flex flex-col">
+        {/* Days Header */}
+        <div className="grid grid-cols-7 gap-px mb-2">
+          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
+            <div key={d} className="text-center font-bold text-slate-500 py-2">{d}</div>
+          ))}
+        </div>
+
+        {/* Grid */}
+        <div className="grid grid-cols-7 gap-px bg-slate-700 flex-1 rounded-xl overflow-hidden border border-slate-700">
+          {Array.from({ length: startOffset }).map((_, i) => (
+            <div key={`empty-${i}`} className="bg-slate-800" />
+          ))}
+          
+          {days.map(day => {
+            const dateStr = format(day, 'yyyy-MM-dd');
+            const dayTasks = tasks?.filter(t => t.assigned_date === dateStr) || [];
+            const dayEvents = events?.filter(e => e.date === dateStr) || [];
+            
+            return (
+              <div 
+                key={dateStr}
+                onClick={() => setSelectedDate(day)}
+                className={`bg-slate-800 p-2 cursor-pointer transition-colors hover:bg-slate-700/50 flex flex-col ${isSameDay(day, today) ? 'ring-2 ring-inset ring-blue-500' : ''} ${dayEvents.length > 0 ? 'border border-amber-500/50 shadow-[inset_0_0_10px_rgba(245,158,11,0.1)]' : ''}`}
+              >
+                <div className="text-right mb-1">
+                  <span className={`text-sm font-medium w-6 h-6 inline-flex items-center justify-center rounded-full ${isSameDay(day, today) ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>
+                    {format(day, 'd')}
+                  </span>
+                </div>
+                <div className="flex-1 space-y-1 overflow-y-auto pr-1">
+                  {dayEvents.map(ev => (
+                    <div key={`ev-${ev.id}`} className="text-[10px] truncate px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/30 text-amber-300 font-bold flex items-center gap-1">
+                      <span>{eventIcons[ev.category]}</span>
+                      {ev.name}
+                    </div>
+                  ))}
+                  {dayTasks.slice(0, 3).map(task => (
+                    <div key={task.id} className="text-[10px] truncate px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">
+                      {task.title}
+                    </div>
+                  ))}
+                  {dayTasks.length > 3 && (
+                    <div className="text-[10px] text-slate-500 font-medium pl-1">+{dayTasks.length - 3} tasks</div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Date Details Side Panel / Modal */}
+      <AnimatePresence>
+        {selectedDate && (
+          <motion.div
+            initial={{ opacity: 0, x: 100 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 100 }}
+            className="fixed top-0 right-0 bottom-0 w-[400px] bg-slate-900 border-l border-slate-800 shadow-2xl z-50 p-6 flex flex-col"
+          >
+            <div className="flex justify-between items-center border-b border-slate-800 pb-4 mb-6">
+              <h2 className="text-2xl font-bold text-white">{format(selectedDate, 'MMMM do, yyyy')}</h2>
+              <button onClick={() => setSelectedDate(null)} className="text-slate-500 hover:text-white">✕</button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-3 pr-2">
+              {(() => {
+                const dayTasks = tasks?.filter(t => t.assigned_date === format(selectedDate, 'yyyy-MM-dd')) || [];
+                const dayEvents = events?.filter(e => e.date === format(selectedDate, 'yyyy-MM-dd')) || [];
+                
+                if (dayTasks.length === 0 && dayEvents.length === 0) {
+                  return <p className="text-slate-500 text-center py-10">Nothing planned for this day.</p>;
+                }
+
+                return (
+                  <>
+                    {dayEvents.map(ev => (
+                      <div key={`ev-${ev.id}`} className="p-3 bg-amber-500/10 rounded-lg border border-amber-500/30 flex items-center gap-3">
+                        <span className="text-2xl">{eventIcons[ev.category]}</span>
+                        <div>
+                          <div className="font-bold text-amber-400">{ev.name}</div>
+                          <div className="text-xs text-amber-500/70 uppercase tracking-wider">{ev.category}</div>
+                        </div>
+                      </div>
+                    ))}
+                    {dayTasks.map(task => (
+                      <div key={task.id} className="p-3 bg-slate-800 rounded-lg border border-slate-700">
+                        <div className="font-medium text-slate-200">{task.title}</div>
+                        <div className="text-xs text-slate-500 mt-1">{task.status}</div>
+                      </div>
+                    ))}
+                  </>
+                );
+              })()}
+            </div>
+
+            <div className="pt-6 border-t border-slate-800 mt-auto">
+              <div className="flex gap-2 mb-4 bg-slate-800 p-1 rounded-lg">
+                <button 
+                  onClick={() => setAddType('task')}
+                  className={`flex-1 py-1.5 text-sm font-medium rounded ${addType === 'task' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                >
+                  Add Task
+                </button>
+                <button 
+                  onClick={() => setAddType('event')}
+                  className={`flex-1 py-1.5 text-sm font-medium rounded ${addType === 'event' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                >
+                  Add Event
+                </button>
+              </div>
+
+              {addType === 'task' ? (
+                <form onSubmit={(e) => {
+                  e.preventDefault();
+                  if (newTaskTitle.trim()) {
+                    createTask.mutate({ title: newTaskTitle, assigned_date: format(selectedDate, 'yyyy-MM-dd') });
+                  }
+                }}>
+                  <input
+                    type="text"
+                    value={newTaskTitle}
+                    onChange={e => setNewTaskTitle(e.target.value)}
+                    placeholder="Task title..."
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <button 
+                    type="submit"
+                    disabled={!newTaskTitle.trim() || createTask.isPending}
+                    className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg transition-colors"
+                  >
+                    Create Task
+                  </button>
+                </form>
+              ) : (
+                <form onSubmit={(e) => {
+                  e.preventDefault();
+                  if (newEventName.trim() && newEventCategory) {
+                    createEvent.mutate({ name: newEventName, category: newEventCategory, date: format(selectedDate, 'yyyy-MM-dd') });
+                  }
+                }}>
+                  <input
+                    type="text"
+                    value={newEventName}
+                    onChange={e => setNewEventName(e.target.value)}
+                    placeholder="Event name..."
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white mb-3 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  />
+                  <select
+                    value={newEventCategory}
+                    onChange={e => setNewEventCategory(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white mb-3 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  >
+                    <option value="Travel">✈️ Travel</option>
+                    <option value="Exam">📝 Exam</option>
+                    <option value="Eid (عيد)">🌙 Eid (عيد)</option>
+                    <option value="Family">👨‍👩‍👧‍👦 Family</option>
+                    <option value="Football">⚽ Football</option>
+                  </select>
+                  <button 
+                    type="submit"
+                    disabled={!newEventName.trim() || createEvent.isPending}
+                    className="w-full bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg transition-colors"
+                  >
+                    Create Event
+                  </button>
+                </form>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
 }

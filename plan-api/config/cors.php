@@ -3,7 +3,12 @@
 return [
     'paths' => ['api/*', 'sanctum/csrf-cookie'],
     'allowed_methods' => ['*'],
-    'allowed_origins' => ['http://localhost:5173', 'http://localhost:3000', 'https://taskzero.vercel.app'],
+    'allowed_origins' => [
+        env('FRONTEND_URL', 'https://taskzero.vercel.app'),
+        'https://taskzero.vercel.app/',
+        'http://localhost:5173',
+        'http://localhost:3000',
+    ],
     'allowed_origins_patterns' => [],
     'allowed_headers' => ['*'],
     'exposed_headers' => [],

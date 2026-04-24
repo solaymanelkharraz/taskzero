@@ -1,247 +1,224 @@
-import { useEffect, useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getTasks, cycleTask, deleteTask, createTask, updateTask, getProjects, runSweep } from '../api/client'
-import StatsRow from '../components/StatsRow'
-import TaskCard from '../components/TaskCard'
-import QuickCapture from '../components/QuickCapture'
-import Modal from '../components/Modal'
-
-const today = new Date().toISOString().split('T')[0]
-
-function fmt(d) {
-  return new Date(d + 'T00:00:00').toLocaleDateString('en-GB', {
-    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
-  })
-}
+import { useState } from 'react'
+import { motion } from 'framer-motion'
+import { useNavigate } from 'react-router-dom'
+import { format } from 'date-fns'
+import { toast } from 'sonner'
+import { API_BASE } from '../lib/api'
 
 export default function Today() {
-  const queryClient = useQueryClient()
-  const [swept,    setSwept]    = useState(null)
-  const [addOpen,  setAddOpen]  = useState(false)
-  const [editTask, setEditTask] = useState(null)
-  const [form,     setForm]     = useState({ title: '', project_id: '' })
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [idea, setIdea] = useState('');
 
-  const { data: tasks = [] } = useQuery({
-    queryKey: ['tasks', { date: today }],
-    queryFn: async () => (await getTasks({ date: today })).data
-  })
+  // Extract from query cache
+  const { data: tasks } = useQuery({ 
+    queryKey: ['tasks'], 
+    queryFn: () => fetch(`${API_BASE}/tasks`).then(res => res.json()) 
+  });
+  const { data: habits } = useQuery({ 
+    queryKey: ['habits'], 
+    queryFn: () => fetch(`${API_BASE}/habits`).then(res => res.json()) 
+  });
 
-  const { data: projects = [] } = useQuery({
-    queryKey: ['projects'],
-    queryFn: async () => (await getProjects()).data
-  })
+  const todayDate = format(new Date(), 'yyyy-MM-dd');
+  const todayTasks = tasks?.filter(t => t.assigned_date === todayDate && t.status !== 'done') || [];
 
-  useEffect(() => {
-    runSweep().then(r => { 
-      if (r.data.swept > 0) {
-        setSwept(r.data.swept)
-        queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      }
-    })
-  }, [queryClient])
-
-  const cycleMut = useMutation({
-    mutationFn: cycleTask,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tasks'] })
-  })
-
-  const deleteMut = useMutation({
-    mutationFn: deleteTask,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tasks'] })
-  })
-
-  const addMut = useMutation({
-    mutationFn: createTask,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      setAddOpen(false)
-      setForm({ title: '', project_id: '' })
+  const completeTask = useMutation({
+    mutationFn: (id) => fetch(`${API_BASE}/tasks/${id}/cycle`, { method: 'PATCH' }).then(res => res.json()),
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: ['tasks'] });
+      const previousTasks = queryClient.getQueryData(['tasks']);
+      
+      // Optimistically update
+      queryClient.setQueryData(['tasks'], (old) => 
+        old?.map(t => t.id === id ? { ...t, status: 'done' } : t)
+      );
+      
+      toast.success('Task finished! Keep moving.');
+      return { previousTasks };
+    },
+    onError: (err, id, context) => {
+      queryClient.setQueryData(['tasks'], context.previousTasks);
+      toast.error('Failed to update task.');
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
     }
-  })
+  });
 
-  const editMut = useMutation({
-    mutationFn: (data) => updateTask(data.id, data.payload),
+  const logHabit = useMutation({
+    mutationFn: (id) => fetch(`${API_BASE}/habits/${id}/log`, { 
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date: todayDate })
+    }).then(res => res.json()),
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: ['habits'] });
+      const previousHabits = queryClient.getQueryData(['habits']);
+      
+      queryClient.setQueryData(['habits'], (old) => 
+        old?.map(h => h.id === id ? { ...h, logs: [...h.logs, todayDate] } : h)
+      );
+      
+      toast.success('Habit logged! Consistency is key.');
+      return { previousHabits };
+    },
+    onError: (err, id, context) => {
+      queryClient.setQueryData(['habits'], context.previousHabits);
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['habits'] })
+  });
+
+  const saveIdea = useMutation({
+    mutationFn: (text) => fetch(`${API_BASE}/ideas`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: text, category_id: null })
+    }).then(res => res.json()),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      setEditTask(null)
+      setIdea('');
+      toast.success('Idea saved to Brain Dump.');
+      queryClient.invalidateQueries({ queryKey: ['ideas'] });
     }
-  })
-
-  const handleCycle = (id) => cycleMut.mutate(id)
-
-  const handleDelete = (id) => {
-    if (!confirm('Delete this task?')) return
-    deleteMut.mutate(id)
-  }
-
-  const handleAdd = (e) => {
-    e.preventDefault()
-    addMut.mutate({ ...form, assigned_date: today })
-  }
-
-  const handleEdit = (e) => {
-    e.preventDefault()
-    editMut.mutate({ 
-      id: editTask.id, 
-      payload: { 
-        title: editTask.title, 
-        project_id: editTask.project_id || null, 
-        assigned_date: editTask.assigned_date, 
-        status: editTask.status 
-      } 
-    })
-  }
-
-  const total  = tasks.length
-  const done   = tasks.filter(t => t.status === 'done').length
-  const inProg = tasks.filter(t => t.status === 'in_progress').length
-  const pct    = total > 0 ? Math.round((done / total) * 100) : 0
-
-  // Group by project
-  const grouped = tasks.reduce((acc, t) => {
-    const key = t.project_name || 'Standalone'
-    acc[key] = acc[key] ? [...acc[key], t] : [t]
-    return acc
-  }, {})
+  });
 
   return (
-    <div className="max-w-2xl mx-auto py-8 px-4">
-      {/* Midnight Sweep notice */}
-      <AnimatePresence>
-        {swept && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-            className="mb-4 px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-sm flex gap-2"
-          >
-            🌙 <strong>Midnight Sweep:</strong> {swept} task{swept > 1 ? 's' : ''} moved to backlog.
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Header */}
-      <div className="mb-6">
-        <div className="text-xs text-[var(--purple)] font-semibold uppercase tracking-widest mb-1">⚡ Execution Zone</div>
-        <h1 className="text-3xl font-bold text-[var(--text)]">Today</h1>
-        <p className="text-[var(--text-dim)] text-sm mt-1">{fmt(today)} — Ship it.</p>
-      </div>
-
-      {/* Stats */}
-      <StatsRow stats={[
-        { label: 'Scheduled',   value: total,   color: 'var(--text)' },
-        { label: 'In Progress', value: inProg,  color: 'var(--amber)' },
-        { label: 'Done',        value: done,    color: 'var(--green)' },
-        { label: 'Complete',    value: `${pct}%`, color: 'var(--purple)' },
-      ]} />
-
-      {/* Progress bar */}
-      {total > 0 && (
-        <div className="h-1.5 bg-[var(--border)] rounded-full mb-6 overflow-hidden">
-          <motion.div
-            className="h-full bg-[var(--purple)] rounded-full"
-            initial={{ width: 0 }}
-            animate={{ width: `${pct}%` }}
-            transition={{ duration: 0.8, ease: 'easeOut' }}
-          />
-        </div>
-      )}
-
-      {/* Quick Capture */}
-      <QuickCapture />
-
-      {/* Task list */}
-      <div className="bg-[var(--surface2)] border border-[var(--border)] rounded-2xl p-5">
-        <div className="flex items-center justify-between mb-4">
-          <span className="font-semibold text-sm">☑ Today's Tasks</span>
-          <motion.button
-            whileTap={{ scale: 0.95 }}
-            onClick={() => setAddOpen(true)}
-            className="text-xs px-3 py-1.5 rounded-lg bg-[var(--purple-d)] hover:bg-[var(--purple)] text-white transition-colors"
-          >+ Add Task</motion.button>
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }} 
+      animate={{ opacity: 1, y: 0 }} 
+      exit={{ opacity: 0, y: -20 }}
+      className="min-h-screen bg-slate-900 flex flex-col items-center py-20 px-4"
+    >
+      <div className="w-full max-w-2xl space-y-12">
+        {/* Header */}
+        <div className="text-center space-y-4">
+          <h1 className="text-5xl font-black tracking-tight text-white">
+            {format(new Date(), 'EEEE, MMMM do')}
+          </h1>
+          <p className="text-xl text-slate-400">Action Center</p>
         </div>
 
-        {tasks.length === 0 ? (
-          <div className="text-center py-12">
-            <div className="text-4xl mb-2">🎯</div>
-            <div className="font-semibold text-[var(--text-dim)]">Nothing scheduled for today</div>
-            <div className="text-xs text-[var(--text-dim)] mt-1">Go to Control Room to assign tasks.</div>
-          </div>
-        ) : (
-          <AnimatePresence mode="popLayout">
-            {Object.entries(grouped).map(([group, gtasks]) => (
-              <div key={group} className="mb-4">
-                <div className="text-xs text-[var(--text-dim)] uppercase tracking-widest font-semibold mb-2 flex items-center gap-1">
-                  {group === 'Standalone' ? '📥' : '📁'} {group}
-                  <span className="bg-[var(--border)] text-[var(--text-dim)] rounded-full px-1.5 py-0.5 text-xs">{gtasks.length}</span>
-                </div>
-                <div className="flex flex-col gap-2">
-                  {gtasks.map((t, i) => (
-                    <TaskCard key={t.id} task={t} index={i} onCycle={handleCycle} onEdit={setEditTask} onDelete={handleDelete} />
-                  ))}
-                </div>
-              </div>
-            ))}
-          </AnimatePresence>
-        )}
-      </div>
+        {/* Daily Habits */}
+        <div className="space-y-4">
+          <h2 className="text-2xl font-bold text-slate-200">Daily Habits</h2>
+          {habits?.length === 0 ? (
+            <div className="text-slate-500 italic text-sm">No habits created yet.</div>
+          ) : (
+            <div className="space-y-3">
+              {habits?.map(habit => {
+                const isDoneToday = habit.logs.includes(todayDate);
+                const past7Days = Array.from({ length: 7 }, (_, i) => {
+                  const d = new Date();
+                  d.setDate(d.getDate() - 6 + i);
+                  return format(d, 'yyyy-MM-dd');
+                });
 
-      {/* Add Task Modal */}
-      <Modal open={addOpen} onClose={() => setAddOpen(false)} title="➕ New Task for Today">
-        <form onSubmit={handleAdd} className="flex flex-col gap-4">
-          <input required placeholder="Task title…" value={form.title}
-            onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
-            className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-xl px-4 py-2.5
-                       text-sm text-[var(--text)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--purple)]" />
-          <select value={form.project_id} onChange={e => setForm(f => ({ ...f, project_id: e.target.value }))}
-            className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-xl px-4 py-2.5 text-sm text-[var(--text)]">
-            <option value="">— Standalone —</option>
-            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-          <div className="flex gap-2 justify-end">
-            <button type="button" onClick={() => setAddOpen(false)} className="px-4 py-2 text-sm text-[var(--text-dim)] hover:text-[var(--text)] transition-colors">Cancel</button>
-            <motion.button whileTap={{ scale: 0.95 }} type="submit" disabled={addMut.isPending}
-              className="px-5 py-2 bg-[var(--purple-d)] hover:bg-[var(--purple)] text-white text-sm font-semibold rounded-xl transition-colors">
-              Add Task
-            </motion.button>
-          </div>
-        </form>
-      </Modal>
+                return (
+                  <div
+                    key={habit.id}
+                    className="flex items-center justify-between p-4 bg-slate-800 rounded-xl border border-slate-700"
+                  >
+                    <div className="flex-1 font-bold text-slate-200">{habit.name}</div>
+                    
+                    <div className="flex items-center gap-1 mx-6">
+                      {past7Days.map(date => {
+                        const done = habit.logs.includes(date);
+                        return (
+                          <div 
+                            key={date} 
+                            className={`w-6 h-6 rounded-sm ${done ? 'bg-emerald-500' : 'bg-slate-700'} ${date === todayDate ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-slate-800' : ''}`}
+                            title={date}
+                          />
+                        );
+                      })}
+                    </div>
 
-      {/* Edit Task Modal */}
-      <Modal open={!!editTask} onClose={() => setEditTask(null)} title="✎ Edit Task">
-        {editTask && (
-          <form onSubmit={handleEdit} className="flex flex-col gap-4">
-            <input required value={editTask.title} onChange={e => setEditTask(t => ({ ...t, title: e.target.value }))}
-              className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-xl px-4 py-2.5
-                         text-sm text-[var(--text)] focus:outline-none focus:border-[var(--purple)]" />
-            <select value={editTask.status} onChange={e => {
-                const newStatus = e.target.value
-                setEditTask(t => ({ 
-                  ...t, 
-                  status: newStatus,
-                  assigned_date: newStatus === 'in_progress' ? today : t.assigned_date
-                }))
-              }}
-              className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-xl px-4 py-2.5 text-sm text-[var(--text)]">
-              <option value="todo">To Do</option>
-              <option value="in_progress">In Progress</option>
-              <option value="done">Done</option>
-            </select>
-            <select value={editTask.project_id || ''} onChange={e => setEditTask(t => ({ ...t, project_id: e.target.value }))}
-              className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-xl px-4 py-2.5 text-sm text-[var(--text)]">
-              <option value="">— Standalone —</option>
-              {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-            <div className="flex gap-2 justify-end">
-              <button type="button" onClick={() => setEditTask(null)} className="px-4 py-2 text-sm text-[var(--text-dim)] hover:text-[var(--text)] transition-colors">Cancel</button>
-              <motion.button whileTap={{ scale: 0.95 }} type="submit" disabled={editMut.isPending}
-                className="px-5 py-2 bg-[var(--purple-d)] hover:bg-[var(--purple)] text-white text-sm font-semibold rounded-xl transition-colors">
-                Save
-              </motion.button>
+                    <button
+                      onClick={() => logHabit.mutate(habit.id)}
+                      disabled={isDoneToday || logHabit.isPending}
+                      className={`px-6 py-2 rounded-lg font-bold transition-all text-sm w-32 ${
+                        isDoneToday 
+                          ? 'bg-emerald-600/20 text-emerald-500 cursor-default' 
+                          : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                      }`}
+                    >
+                      {isDoneToday ? '✓ Done' : 'Did it today?'}
+                    </button>
+                  </div>
+                );
+              })}
             </div>
+          )}
+        </div>
+
+        {/* Today's Tasks */}
+        <div className="space-y-4">
+          <h2 className="text-2xl font-bold text-slate-200">Current Focus</h2>
+          {todayTasks.length === 0 ? (
+            <div className="p-8 text-center border-2 border-dashed border-slate-700 rounded-xl text-slate-500">
+              No tasks for today. Take a break!
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {todayTasks.map(task => (
+                <div key={task.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-5 bg-slate-800 rounded-xl shadow-lg border border-slate-700 transition-colors gap-4">
+                  <div>
+                    <div className="text-lg text-slate-100">{task.title}</div>
+                    <div className="text-xs text-slate-400 mt-1">{task.project_name || 'Standalone'}</div>
+                  </div>
+                  <div className="flex items-center shrink-0">
+                    <button 
+                      onClick={() => completeTask.mutate(task.id)}
+                      className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-bold transition-colors"
+                    >
+                      Done
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Quick Idea */}
+        <div className="space-y-4">
+          <h2 className="text-2xl font-bold text-slate-200">Brain Dump</h2>
+          <form 
+            onSubmit={(e) => { e.preventDefault(); if (idea.trim()) saveIdea.mutate(idea); }}
+            className="flex gap-3"
+          >
+            <input 
+              type="text" 
+              value={idea}
+              onChange={(e) => setIdea(e.target.value)}
+              placeholder="Got an idea?"
+              className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-5 py-4 text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <button 
+              type="submit"
+              disabled={!idea.trim() || saveIdea.isPending}
+              className="px-8 py-4 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold rounded-xl transition-colors"
+            >
+              Save
+            </button>
           </form>
-        )}
-      </Modal>
-    </div>
-  )
+        </div>
+
+        {/* Navigation */}
+        <div className="pt-12 text-center border-t border-slate-800">
+          <button 
+            onClick={() => navigate('/dashboard')}
+            className="text-slate-400 hover:text-white flex items-center gap-2 mx-auto transition-colors"
+          >
+            Enter Dashboard
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M12.293 5.293a1 1 0 011.414 0l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-2.293-2.293a1 1 0 010-1.414z" clipRule="evenodd" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </motion.div>
+  );
 }

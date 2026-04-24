@@ -17,11 +17,13 @@ class Task extends Model
         'title',
         'status',
         'assigned_date',
+        'completed_at',
         'project_id',
     ];
 
     protected $casts = [
         'assigned_date' => 'date:Y-m-d',
+        'completed_at' => 'datetime',
     ];
 
     public function project(): BelongsTo

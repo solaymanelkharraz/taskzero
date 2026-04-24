@@ -14,7 +14,9 @@ class ProjectController extends Controller
      */
     public function index(): JsonResponse
     {
-        $projects = Project::withCount([
+        $projects = Project::with(['tasks' => function ($query) {
+            $query->orderBy('created_at', 'desc');
+        }])->withCount([
             'tasks as total_tasks',
             'tasks as done_tasks' => function ($query) {
                 $query->where('status', 'done');
@@ -64,12 +66,22 @@ class ProjectController extends Controller
             'pct'   => $total > 0 ? round($done / $total * 100) : 0,
         ];
 
+        $lastActivity = $project->tasks->first()?->created_at?->toISOString() ?? null;
+
         return [
-            'id'          => $project->id,
-            'name'        => $project->name,
-            'description' => $project->description,
-            'created_at'  => $project->created_at?->toISOString(),
-            'stats'       => $stats,
+            'id'            => $project->id,
+            'name'          => $project->name,
+            'description'   => $project->description,
+            'created_at'    => $project->created_at?->toISOString(),
+            'stats'         => $stats,
+            'tasks'         => $project->tasks->map(fn($t) => [
+                'id'            => $t->id,
+                'title'         => $t->title,
+                'status'        => $t->status,
+                'assigned_date' => $t->assigned_date?->format('Y-m-d'),
+                'created_at'    => $t->created_at?->toISOString(),
+            ]),
+            'last_activity' => $lastActivity,
         ];
     }
 }

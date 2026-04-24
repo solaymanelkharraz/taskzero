@@ -1,51 +1,84 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
-import { getTasks } from '../api/client'
 
 export default function History() {
-  const [tasks, setTasks] = useState([])
+  const { data: tasks } = useQuery({ 
+    queryKey: ['tasks'],
+    queryFn: () => fetch('http://127.0.0.1:8000/api/tasks').then(res => res.json())
+  });
+  
+  const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState('date_desc'); // date_desc, date_asc, name, project
 
-  useEffect(() => {
-    getTasks({ status: 'done' }).then(r => setTasks(r.data))
-  }, [])
+  const doneTasks = tasks?.filter(t => t.status === 'done') || [];
+
+  const filteredTasks = doneTasks.filter(t => {
+    const term = search.toLowerCase();
+    return t.title.toLowerCase().includes(term) || (t.project_name && t.project_name.toLowerCase().includes(term));
+  });
+
+  const sortedTasks = [...filteredTasks].sort((a, b) => {
+    if (sortBy === 'name') return a.title.localeCompare(b.title);
+    if (sortBy === 'project') return (a.project_name || '').localeCompare(b.project_name || '');
+    
+    // Sort by completed_at (which is the date finished if status changed)
+    const aDate = a.completed_at || '1970-01-01';
+    const bDate = b.completed_at || '1970-01-01';
+    if (sortBy === 'date_asc') return aDate.localeCompare(bDate);
+    return bDate.localeCompare(aDate);
+  });
 
   return (
-    <div className="max-w-2xl mx-auto py-8 px-4">
-      <div className="mb-8">
-        <div className="text-xs text-[var(--purple)] font-semibold uppercase tracking-widest mb-1">📜 History</div>
-        <h1 className="text-3xl font-bold">Completed Tasks</h1>
-        <p className="text-[var(--text-dim)] text-sm mt-1">{tasks.length} tasks shipped. Keep going.</p>
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="p-10 space-y-8">
+      <div className="flex justify-between items-end border-b border-slate-800 pb-6">
+        <div>
+          <h1 className="text-4xl font-black text-white">History</h1>
+          <p className="text-slate-400 mt-2">The Graveyard</p>
+        </div>
       </div>
 
-      {tasks.length === 0 ? (
-        <div className="text-center py-16">
-          <div className="text-5xl mb-3">📜</div>
-          <div className="text-[var(--text-dim)]">No completed tasks yet.</div>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-2">
-          {tasks.map((t, i) => (
-            <motion.div
-              key={t.id}
-              initial={{ opacity: 0, x: -16 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: i * 0.03 }}
-              className="flex items-center gap-3 px-4 py-3 bg-[var(--surface2)] border border-[var(--border)] rounded-xl opacity-70 hover:opacity-100 transition-opacity"
-            >
-              <span className="text-green-500 text-sm">✓</span>
-              <span className="flex-1 text-sm text-[var(--text)] line-through">{t.title}</span>
-              {t.assigned_date && (
-                <span className="text-xs text-[var(--text-dim)] shrink-0">
-                  {new Date(t.assigned_date + 'T00:00:00').toLocaleDateString('en-GB', { month: 'short', day: 'numeric', year: 'numeric' })}
-                </span>
-              )}
-              {t.project_name !== 'Standalone' && (
-                <span className="text-xs text-[var(--purple)] bg-[var(--purple-d)]/10 px-2 py-0.5 rounded-full shrink-0">{t.project_name}</span>
-              )}
-            </motion.div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
+      <div className="flex flex-col md:flex-row gap-4 mb-6">
+        <input 
+          type="text" 
+          placeholder="Search tasks or projects..." 
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="flex-1 bg-slate-800 border border-slate-700 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        <select 
+          value={sortBy}
+          onChange={e => setSortBy(e.target.value)}
+          className="bg-slate-800 border border-slate-700 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          <option value="date_desc">Recent First</option>
+          <option value="date_asc">Oldest First</option>
+          <option value="name">Task Name</option>
+          <option value="project">Project Name</option>
+        </select>
+      </div>
+
+      <div className="space-y-4">
+        {sortedTasks.length === 0 ? (
+          <div className="text-center py-20 text-slate-500 border-2 border-dashed border-slate-700 rounded-2xl">
+            No finished tasks found.
+          </div>
+        ) : (
+          sortedTasks.map(task => (
+            <div key={task.id} className="flex justify-between items-center p-5 bg-slate-800 rounded-xl border border-slate-700">
+              <div>
+                <h3 className="text-lg font-bold text-white line-through opacity-70">{task.title}</h3>
+                <div className="flex gap-4 text-sm mt-1">
+                  <span className="text-slate-500">{task.project_name || 'Standalone'}</span>
+                </div>
+              </div>
+              <div className="text-slate-500 text-sm bg-slate-900 px-3 py-1 rounded-lg">
+                Finished: {new Date(task.completed_at || task.updated_at).toLocaleDateString()}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </motion.div>
+  );
 }

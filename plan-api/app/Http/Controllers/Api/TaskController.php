@@ -16,7 +16,7 @@ class TaskController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Task::with('project')->orderByRaw("FIELD(status,'in_progress','todo','done')");
+        $query = Task::with('project')->orderByRaw("FIELD(status,'not_done','done')");
 
         if ($request->filled('date')) {
             $query->whereDate('assigned_date', $request->date);
@@ -34,6 +34,10 @@ class TaskController extends Controller
             $query->whereNull('assigned_date');
         }
 
+        if ($request->boolean('exclude_done')) {
+            $query->where('status', '!=', 'done');
+        }
+
         $tasks = $query->get()->map(fn($t) => $this->format($t));
 
         return response()->json($tasks);
@@ -46,16 +50,17 @@ class TaskController extends Controller
     {
         $data = $request->validate([
             'title'         => 'required|string|max:255',
-            'status'        => 'sometimes|in:todo,in_progress,done',
+            'status'        => 'sometimes|in:not_done,done',
             'assigned_date' => 'nullable|date',
             'project_id'    => 'nullable|integer|exists:projects,id',
         ]);
 
         $task = Task::create([
             'title'         => $data['title'],
-            'status'        => $data['status'] ?? 'todo',
+            'status'        => $data['status'] ?? 'not_done',
             'assigned_date' => $data['assigned_date'] ?? null,
             'project_id'    => $data['project_id'] ?? null,
+            'completed_at'  => (isset($data['status']) && $data['status'] === 'done') ? now() : null,
         ]);
 
         return response()->json($this->format($task->load('project')), 201);
@@ -70,10 +75,18 @@ class TaskController extends Controller
 
         $data = $request->validate([
             'title'         => 'sometimes|string|max:255',
-            'status'        => 'sometimes|in:todo,in_progress,done',
+            'status'        => 'sometimes|in:not_done,done',
             'assigned_date' => 'nullable|date',
             'project_id'    => 'nullable|integer|exists:projects,id',
         ]);
+
+        if (isset($data['status'])) {
+            if ($data['status'] === 'done' && $task->status !== 'done') {
+                $data['completed_at'] = now();
+            } elseif ($data['status'] !== 'done') {
+                $data['completed_at'] = null;
+            }
+        }
 
         $task->update($data);
 
@@ -90,24 +103,18 @@ class TaskController extends Controller
     }
 
     /**
-     * PATCH /api/tasks/{id}/cycle  — todo→in_progress→done→todo
+     * PATCH /api/tasks/{id}/cycle  — not_done <-> done
      */
     public function cycle(int $id): JsonResponse
     {
         $task = Task::findOrFail($id);
 
-        $next = match ($task->status) {
-            'todo'        => 'in_progress',
-            'in_progress' => 'done',
-            default       => 'todo',
-        };
+        $next = $task->status === 'done' ? 'not_done' : 'done';
 
-        $updateData = ['status' => $next];
-        
-        // Auto-route to Today if moved to In Progress
-        if ($next === 'in_progress') {
-            $updateData['assigned_date'] = Carbon::today()->toDateString();
-        }
+        $updateData = [
+            'status' => $next,
+            'completed_at' => $next === 'done' ? now() : null,
+        ];
 
         $task->update($updateData);
 
@@ -134,6 +141,7 @@ class TaskController extends Controller
             'project_id'    => $task->project_id,
             'project_name'  => $task->project?->name ?? 'Standalone',
             'created_at'    => $task->created_at?->toISOString(),
+            'completed_at'  => $task->completed_at?->toISOString(),
         ];
     }
 }

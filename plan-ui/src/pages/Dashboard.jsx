@@ -1,362 +1,557 @@
 import { useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getTasks, createTask, updateTask, deleteTask, getProjects, createProject, deleteProject, getWeek } from '../api/client'
-import TaskCard from '../components/TaskCard'
-import Modal from '../components/Modal'
-
-const today = new Date().toISOString().split('T')[0]
+import { motion, AnimatePresence } from 'framer-motion'
+import { format } from 'date-fns'
+import { toast } from 'sonner'
+import { API_BASE } from '../lib/api'
 
 export default function Dashboard() {
-  const queryClient = useQueryClient()
-  const [selPid,    setSelPid]    = useState(null)
-  const [addTaskOpen, setAddTaskOpen] = useState(false)
-  const [addProjOpen, setAddProjOpen] = useState(false)
-  const [editTask,    setEditTask]    = useState(null)
+  const [activeTab, setActiveTab] = useState('tasks');
+  const [selectedProject, setSelectedProject] = useState(null);
+  const [editingTask, setEditingTask] = useState(null);
+  
+  const [isAddingProject, setIsAddingProject] = useState(false);
+  const [newProject, setNewProject] = useState({ name: '', description: '' });
 
-  const [taskForm, setTaskForm] = useState({ title: '', assigned_date: '', project_id: '' })
-  const [projForm, setProjForm] = useState({ name: '', description: '' })
+  const [isAddingTask, setIsAddingTask] = useState(false);
+  const [newTask, setNewTask] = useState({ title: '', assigned_date: '', project_id: '' });
 
-  const { data: backlog = [] } = useQuery({
-    queryKey: ['tasks', { backlog: 1 }],
-    queryFn: async () => (await getTasks({ backlog: 1 })).data
-  })
+  const [sortBy, setSortBy] = useState('assigned_date'); // 'assigned_date', 'project', 'overdue'
 
-  const { data: projects = [] } = useQuery({
+  const queryClient = useQueryClient();
+  const { data: tasks } = useQuery({ 
+    queryKey: ['tasks'],
+    queryFn: () => fetch(`${API_BASE}/tasks`).then(res => res.json())
+  });
+  const { data: projects } = useQuery({ 
     queryKey: ['projects'],
-    queryFn: async () => (await getProjects()).data
-  })
+    queryFn: () => fetch(`${API_BASE}/projects`).then(res => res.json())
+  });
 
-  const { data: week = [] } = useQuery({
-    queryKey: ['week'],
-    queryFn: async () => (await getWeek()).data
-  })
-
-  const { data: weekTasks = {} } = useQuery({
-    queryKey: ['weekTasks', week.map(d => d.date)],
-    queryFn: async () => {
-      if (!week.length) return {}
-      const promises = week.map(d => getTasks({ date: d.date }).then(r => [d.date, r.data]))
-      const results = await Promise.all(promises)
-      return Object.fromEntries(results)
+  const completeTask = useMutation({
+    mutationFn: (id) => fetch(`${API_BASE}/tasks/${id}/cycle`, { method: 'PATCH' }).then(res => res.json()),
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: ['tasks'] });
+      const previous = queryClient.getQueryData(['tasks']);
+      queryClient.setQueryData(['tasks'], (old) => 
+        old?.map(t => t.id === id ? { ...t, status: 'done' } : t)
+      );
+      toast.success('Task marked as done.');
+      return { previous };
     },
-    enabled: week.length > 0
-  })
+    onError: (err, id, context) => queryClient.setQueryData(['tasks'], context.previous),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+    }
+  });
 
-  const { data: projTasks = [] } = useQuery({
-    queryKey: ['tasks', { project_id: selPid }],
-    queryFn: async () => (await getTasks({ project_id: selPid })).data,
-    enabled: !!selPid
-  })
+  const updateTask = useMutation({
+    mutationFn: ({ id, data }) => fetch(`${API_BASE}/tasks/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    }).then(res => res.json()),
+    onMutate: async ({ id, data }) => {
+      await queryClient.cancelQueries({ queryKey: ['tasks'] });
+      const previous = queryClient.getQueryData(['tasks']);
+      queryClient.setQueryData(['tasks'], (old) => 
+        old?.map(t => t.id === id ? { ...t, ...data } : t)
+      );
+      setEditingTask(null);
+      toast.success('Task updated.');
+      return { previous };
+    },
+    onError: (err, variables, context) => queryClient.setQueryData(['tasks'], context.previous),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+    }
+  });
 
-  const invalidateAll = () => {
-    queryClient.invalidateQueries({ queryKey: ['tasks'] })
-    queryClient.invalidateQueries({ queryKey: ['projects'] })
-    queryClient.invalidateQueries({ queryKey: ['week'] })
-    queryClient.invalidateQueries({ queryKey: ['weekTasks'] })
-  }
+  const deleteTask = useMutation({
+    mutationFn: (id) => fetch(`${API_BASE}/tasks/${id}`, { method: 'DELETE' }),
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: ['tasks'] });
+      const previous = queryClient.getQueryData(['tasks']);
+      queryClient.setQueryData(['tasks'], (old) => old?.filter(t => t.id !== id));
+      toast.info('Task deleted.');
+      return { previous };
+    },
+    onError: (err, id, context) => queryClient.setQueryData(['tasks'], context.previous),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+    }
+  });
 
-  // ── Task CRUD ─────────────────────────────────────────────
-  const addMut = useMutation({
-    mutationFn: createTask,
+  const createTask = useMutation({
+    mutationFn: (data) => fetch(`${API_BASE}/tasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    }).then(res => res.json()),
     onSuccess: () => {
-      invalidateAll()
-      setAddTaskOpen(false)
-      setTaskForm({ title: '', assigned_date: '', project_id: '' })
+      setIsAddingTask(false);
+      setNewTask({ title: '', assigned_date: '', project_id: '' });
+      toast.success('New task created.');
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
     }
-  })
+  });
 
-  const editMut = useMutation({
-    mutationFn: (data) => updateTask(data.id, data.payload),
+  const createProject = useMutation({
+    mutationFn: (data) => fetch(`${API_BASE}/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    }).then(res => res.json()),
     onSuccess: () => {
-      invalidateAll()
-      setEditTask(null)
+      setIsAddingProject(false);
+      setNewProject({ name: '', description: '' });
+      toast.success('Project created successfully.');
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
     }
-  })
+  });
 
-  const delMut = useMutation({
-    mutationFn: deleteTask,
-    onSuccess: invalidateAll
-  })
-
-  const handleAddTask = (e) => {
-    e.preventDefault()
-    addMut.mutate({
-      title: taskForm.title,
-      assigned_date: taskForm.assigned_date || null,
-      project_id:    taskForm.project_id || null,
-    })
-  }
-
-  const handleEditTask = (e) => {
-    e.preventDefault()
-    editMut.mutate({
-      id: editTask.id,
-      payload: {
-        title:         editTask.title,
-        status:        editTask.status,
-        assigned_date: editTask.assigned_date || null,
-        project_id:    editTask.project_id || null,
-      }
-    })
-  }
-
-  const handleDelete = (id) => {
-    if (!confirm('Delete this task?')) return
-    delMut.mutate(id)
-  }
-
-  // ── Project CRUD ──────────────────────────────────────────
-  const addProjMut = useMutation({
-    mutationFn: createProject,
-    onSuccess: () => {
-      invalidateAll()
-      setAddProjOpen(false)
-      setProjForm({ name: '', description: '' })
+  const activeTasks = tasks?.filter(t => t.status !== 'done') || [];
+  
+  const sortedTasks = [...activeTasks].sort((a, b) => {
+    if (sortBy === 'project') return (a.project_name || '').localeCompare(b.project_name || '');
+    if (sortBy === 'overdue') {
+      const aDate = a.assigned_date || '9999-12-31';
+      const bDate = b.assigned_date || '9999-12-31';
+      return aDate.localeCompare(bDate);
     }
-  })
-
-  const delProjMut = useMutation({
-    mutationFn: deleteProject,
-    onSuccess: (_, id) => {
-      invalidateAll()
-      if (selPid === id) setSelPid(null)
-    }
-  })
-
-  const handleAddProject = (e) => {
-    e.preventDefault()
-    addProjMut.mutate(projForm)
-  }
-
-  const handleDeleteProject = (id) => {
-    if (!confirm('Delete project and unlink its tasks?')) return
-    delProjMut.mutate(id)
-  }
-
-  const openAddTask = (date = '') => {
-    setTaskForm({ title: '', assigned_date: date, project_id: '' })
-    setAddTaskOpen(true)
-  }
-
-  // ── Input helper ──────────────────────────────────────────
-  const inp = 'w-full bg-[var(--surface)] border border-[var(--border)] rounded-xl px-4 py-2.5 text-sm text-[var(--text)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--purple)] transition-colors'
+    // Default assigned_date
+    const aDate = a.assigned_date || '9999-12-31';
+    const bDate = b.assigned_date || '9999-12-31';
+    return aDate.localeCompare(bDate);
+  });
 
   return (
-    <div className="max-w-3xl mx-auto py-8 px-4">
-      {/* Header */}
-      <div className="flex items-start justify-between mb-8 gap-4 flex-wrap">
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="p-10 space-y-8">
+      <div className="flex justify-between items-end border-b border-slate-800 pb-6">
         <div>
-          <div className="text-xs text-[var(--purple)] font-semibold uppercase tracking-widest mb-1">🗂️ Dashboard</div>
-          <h1 className="text-3xl font-bold">Control Room</h1>
-          <p className="text-[var(--text-dim)] text-sm mt-1">Plan your week, manage projects, run the system.</p>
+          <h1 className="text-4xl font-black text-white">Control Room</h1>
+          <p className="text-slate-400 mt-2">Master Overview</p>
         </div>
-        <motion.button whileTap={{ scale: 0.95 }} onClick={() => openAddTask()}
-          className="px-5 py-2.5 bg-[var(--purple-d)] hover:bg-[var(--purple)] text-white text-sm font-semibold rounded-xl transition-colors shrink-0">
-          + New Task
-        </motion.button>
-      </div>
-
-      {/* ── Backlog ─────────────────────────────────────────── */}
-      <div className="text-xs text-[var(--purple)] font-semibold uppercase tracking-widest mb-3 flex items-center gap-2">
-        📥 Backlog <span className="bg-[var(--border)] text-[var(--text-dim)] rounded-full px-1.5">{backlog.length}</span>
-      </div>
-      <div className="bg-[var(--surface2)] border border-[var(--border)] rounded-2xl p-5 mb-8">
-        <div className="flex items-center justify-between mb-3">
-          <span className="font-semibold text-sm">Unscheduled Tasks</span>
-          <button onClick={() => openAddTask()}
-            className="text-xs text-[var(--text-dim)] hover:text-[var(--purple)] transition-colors">+ Add to Backlog</button>
-        </div>
-        {backlog.length === 0
-          ? <div className="text-center py-8 text-[var(--text-dim)] text-sm">🎯 Backlog is clear. Impressive.</div>
-          : <div className="flex flex-col gap-2">
-              <AnimatePresence mode="popLayout">
-                {backlog.map((t, i) => (
-                  <TaskCard key={t.id} task={t} index={i} onEdit={setEditTask} onDelete={handleDelete} />
-                ))}
-              </AnimatePresence>
-            </div>
-        }
-      </div>
-
-      {/* ── Calendar Strip ──────────────────────────────────── */}
-      <div className="text-xs text-[var(--purple)] font-semibold uppercase tracking-widest mb-3">📅 Next 7 Days</div>
-      <div className="flex gap-2 overflow-x-auto pb-2 mb-4 snap-x">
-        {week.map((d, i) => (
-          <motion.div
-            key={d.date}
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.06 }}
-            onClick={() => openAddTask(d.date)}
-            className={`shrink-0 snap-start flex flex-col items-center gap-1 px-4 py-3 rounded-2xl border cursor-pointer transition-all
-              ${d.date === today
-                ? 'bg-[var(--purple-d)]/20 border-[var(--purple)] text-[var(--purple)]'
-                : 'bg-[var(--surface2)] border-[var(--border)] hover:border-[var(--purple-d)] text-[var(--text-dim)]'
-              }`}
+        <div className="flex space-x-2 bg-slate-800 p-1 rounded-xl">
+          <button
+            onClick={() => setActiveTab('tasks')}
+            className={`px-6 py-2 rounded-lg font-medium transition-colors ${activeTab === 'tasks' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
           >
-            <div className="text-xs font-bold uppercase">{d.dow}</div>
-            <div className="text-2xl font-bold text-[var(--text)]">{d.day}</div>
-            <div className="text-xs">{d.month}</div>
-            <div className="flex gap-0.5 mt-1">
-              {Array.from({ length: Math.min(d.count, 4) }).map((_, j) => (
-                <div key={j} className="w-1.5 h-1.5 rounded-full bg-[var(--purple)]" />
-              ))}
+            Tasks
+          </button>
+          <button
+            onClick={() => setActiveTab('projects')}
+            className={`px-6 py-2 rounded-lg font-medium transition-colors ${activeTab === 'projects' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+          >
+            Projects
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-8">
+        {activeTab === 'tasks' && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+            <div className="flex justify-between items-center mb-4">
+              <button 
+                onClick={() => setIsAddingTask(true)}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-colors shadow-lg"
+              >
+                + Add Task
+              </button>
+              <select 
+                value={sortBy} 
+                onChange={e => setSortBy(e.target.value)}
+                className="bg-slate-800 border border-slate-700 text-white rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+              >
+                <option value="assigned_date">Sort by Scheduled Time</option>
+                <option value="overdue">Sort by Overdue</option>
+                <option value="project">Sort by Project</option>
+              </select>
+            </div>
+            {sortedTasks.map(task => (
+              <div key={task.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-5 bg-slate-800 rounded-xl shadow-lg border border-slate-700 hover:border-blue-500 transition-colors gap-4">
+                <div>
+                  <h3 className="text-lg font-bold text-white">{task.title}</h3>
+                  <div className="flex gap-4 text-sm mt-1">
+                    <span className={`px-2 py-0.5 rounded text-xs ${
+                      task.status === 'in_progress' ? 'bg-blue-500/20 text-blue-400' : 'bg-slate-500/20 text-slate-400'
+                    }`}>
+                      {task.status.replace('_', ' ').toUpperCase()}
+                    </span>
+                    <span className="text-slate-400">{task.project_name || 'Standalone'}</span>
+                    {task.assigned_date && (
+                      <span className={`${task.assigned_date < format(new Date(), 'yyyy-MM-dd') ? 'text-red-400 font-bold' : 'text-slate-500'}`}>
+                        {task.assigned_date}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {task.assigned_date !== format(new Date(), 'yyyy-MM-dd') && (
+                    <button 
+                      onClick={() => {
+                        fetch(`${API_BASE}/tasks/${task.id}`, {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ assigned_date: format(new Date(), 'yyyy-MM-dd') })
+                        }).then(() => {
+                          toast.success('Task moved to Today.');
+                          queryClient.invalidateQueries({ queryKey: ['tasks'] });
+                        });
+                      }}
+                      className="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors"
+                    >
+                      Work Today
+                    </button>
+                  )}
+                  <button 
+                    onClick={() => {
+                      setEditingTask({
+                        id: task.id,
+                        title: task.title,
+                        assigned_date: task.assigned_date || '',
+                        project_id: task.project_id || ''
+                      });
+                    }}
+                    className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm font-medium transition-colors"
+                  >
+                    Edit
+                  </button>
+                  <button 
+                    onClick={() => { if(confirm('Delete task?')) deleteTask.mutate(task.id); }}
+                    className="px-3 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg text-sm font-medium transition-colors"
+                  >
+                    Delete
+                  </button>
+                  <button 
+                    onClick={() => completeTask.mutate(task.id)}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-medium transition-colors"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            ))}
+          </motion.div>
+        )}
+
+        {activeTab === 'projects' && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+            <div className="flex justify-end">
+              <button 
+                onClick={() => setIsAddingProject(true)}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-colors shadow-lg"
+              >
+                + Add Project
+              </button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {projects?.map(project => (
+              <div key={project.id} className="bg-slate-800 rounded-xl p-6 border border-slate-700 flex flex-col justify-between h-full">
+                <div>
+                  <div className="flex justify-between items-start mb-4">
+                    <h3 className="text-xl font-bold text-white">{project.name}</h3>
+                  </div>
+                  <div className="flex gap-4 text-sm text-slate-400 mb-6">
+                    <div>Tasks: <span className="text-white">{project.stats.total}</span></div>
+                    <div>Done: <span className="text-emerald-400">{project.stats.done}</span></div>
+                  </div>
+                  <div className="w-full bg-slate-700 rounded-full h-2 mb-6">
+                    <div className="bg-blue-500 h-2 rounded-full" style={{ width: `${project.stats.pct}%` }}></div>
+                  </div>
+                </div>
+                <div className="mt-auto pt-4 border-t border-slate-700/50 flex justify-between items-center">
+                  <span className="text-xs text-slate-500">
+                    Activity: {project.last_activity ? format(new Date(project.last_activity), 'MMM do, p') : 'Never'}
+                  </span>
+                  <button 
+                    onClick={() => setSelectedProject(project)}
+                    className="text-sm font-medium text-blue-400 hover:text-blue-300"
+                  >
+                    Details →
+                  </button>
+                </div>
+              </div>
+            ))}
             </div>
           </motion.div>
-        ))}
+        )}
       </div>
 
-      {/* Weekly task detail */}
-      {week.map(d => {
-        const wt = weekTasks[d.date] ?? []
-        if (!wt.length) return null
-        return (
-          <div key={d.date} className="bg-[var(--surface2)] border border-[var(--border)] rounded-2xl p-5 mb-3">
-            <div className="flex items-center justify-between mb-3">
-              <span className="font-semibold text-sm">
-                📅 {d.date === today ? 'Today' : new Date(d.date + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'long', month: 'short', day: 'numeric' })}
-              </span>
-              <span className="text-xs text-[var(--text-dim)]">{wt.length} task{wt.length !== 1 ? 's' : ''}</span>
-            </div>
-            <div className="flex flex-col gap-2">
-              {wt.map((t, i) => <TaskCard key={t.id} task={t} index={i} onEdit={setEditTask} onDelete={handleDelete} />)}
-            </div>
-          </div>
-        )
-      })}
-
-      {/* ── Project Hub ─────────────────────────────────────── */}
-      <div className="text-xs text-[var(--purple)] font-semibold uppercase tracking-widest mt-8 mb-3 flex items-center gap-2">
-        📁 Project Hub <span className="bg-[var(--border)] text-[var(--text-dim)] rounded-full px-1.5">{projects.length}</span>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
-        {projects.map((p, i) => (
-          <motion.div
-            key={p.id}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.06 }}
-            onClick={() => setSelPid(selPid === p.id ? null : p.id)}
-            className={`relative cursor-pointer rounded-2xl border p-5 transition-all
-              ${selPid === p.id ? 'border-[var(--purple)] bg-[var(--purple-d)]/10' : 'border-[var(--border)] bg-[var(--surface2)] hover:border-[var(--purple-d)]'}`}
-          >
-            <div className="flex items-start justify-between gap-2 mb-2">
-              <div className="font-semibold text-sm">{p.name}</div>
-              <button onClick={e => { e.stopPropagation(); handleDeleteProject(p.id) }}
-                className="text-[var(--text-dim)] hover:text-red-400 text-xs transition-colors">🗑</button>
-            </div>
-            {p.description && <div className="text-xs text-[var(--text-dim)] mb-3">{p.description}</div>}
-            <div className="flex items-center justify-between text-xs text-[var(--text-dim)] mb-1">
-              <span>{p.stats.done}/{p.stats.total} done</span>
-              <span className="text-[var(--purple)] font-bold">{p.stats.pct}%</span>
-            </div>
-            <div className="h-1.5 bg-[var(--border)] rounded-full overflow-hidden">
-              <motion.div className="h-full bg-[var(--purple)] rounded-full"
-                initial={{ width: 0 }} animate={{ width: `${p.stats.pct}%` }} transition={{ duration: 0.6 }} />
-            </div>
-          </motion.div>
-        ))}
-
-        {/* Add project card */}
-        <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-          onClick={() => setAddProjOpen(true)}
-          className="cursor-pointer rounded-2xl border-2 border-dashed border-[var(--border)] p-5 flex flex-col items-center justify-center gap-2
-                     text-[var(--text-dim)] hover:border-[var(--purple-d)] hover:text-[var(--purple)] transition-all min-h-[100px]">
-          <span className="text-2xl">+</span>
-          <span className="text-sm font-medium">New Project</span>
-        </motion.div>
-      </div>
-
-      {/* Selected project tasks */}
+      {/* Project Details Modal */}
       <AnimatePresence>
-        {selPid && projTasks.length > 0 && (
-          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-            className="bg-[var(--surface2)] border border-[var(--purple-d)] rounded-2xl p-5 mb-6">
-            <div className="flex items-center justify-between mb-3">
-              <span className="font-semibold text-sm text-[var(--purple)]">
-                📁 {projects.find(p => p.id === selPid)?.name} — All Tasks
-              </span>
-              <button onClick={() => setSelPid(null)} className="text-[var(--text-dim)] hover:text-[var(--text)] text-sm transition-colors">✕</button>
-            </div>
-            <div className="flex flex-col gap-2">
-              {projTasks.map((t, i) => <TaskCard key={t.id} task={t} index={i} onEdit={setEditTask} onDelete={handleDelete} />)}
-            </div>
+        {selectedProject && (
+          <motion.div 
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={(e) => { if (e.target === e.currentTarget) setSelectedProject(null) }}
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl"
+            >
+              <div className="p-6 border-b border-slate-800 flex justify-between items-start">
+                <div>
+                  <h2 className="text-2xl font-bold text-white">{selectedProject.name}</h2>
+                  <p className="text-slate-400 mt-2">{selectedProject.description || 'No description provided.'}</p>
+                </div>
+                <button onClick={() => setSelectedProject(null)} className="text-slate-500 hover:text-white">✕</button>
+              </div>
+              <div className="p-6 max-h-[60vh] overflow-y-auto">
+                <h3 className="text-lg font-semibold text-slate-200 mb-4">Tasks</h3>
+                {selectedProject.tasks?.length === 0 ? (
+                  <p className="text-slate-500">No tasks in this project.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {selectedProject.tasks?.map(task => (
+                      <div key={task.id} className="flex justify-between p-3 bg-slate-800 rounded-lg border border-slate-700/50">
+                        <span className="text-slate-200">{task.title}</span>
+                        <span className={`text-xs px-2 py-1 rounded ${task.status === 'done' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
+                          {task.status}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {/* Edit Task Modal */}
+      <AnimatePresence>
+        {editingTask && (
+          <motion.div 
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={(e) => { if (e.target === e.currentTarget) setEditingTask(null) }}
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl"
+            >
+              <div className="p-6 border-b border-slate-800 flex justify-between items-center">
+                <h2 className="text-xl font-bold text-white">Edit Task</h2>
+                <button onClick={() => setEditingTask(null)} className="text-slate-500 hover:text-white">✕</button>
+              </div>
+              <form 
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  updateTask.mutate({ 
+                    id: editingTask.id, 
+                    data: {
+                      title: editingTask.title,
+                      assigned_date: editingTask.assigned_date || null,
+                      project_id: editingTask.project_id || null
+                    }
+                  });
+                }}
+                className="p-6 space-y-4"
+              >
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-1">Task Name</label>
+                  <input 
+                    type="text" 
+                    required
+                    value={editingTask.title}
+                    onChange={e => setEditingTask({ ...editingTask, title: e.target.value })}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-1">Assigned Date</label>
+                  <input 
+                    type="date" 
+                    value={editingTask.assigned_date}
+                    onChange={e => setEditingTask({ ...editingTask, assigned_date: e.target.value })}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-1">Project Association</label>
+                  <select 
+                    value={editingTask.project_id}
+                    onChange={e => setEditingTask({ ...editingTask, project_id: e.target.value })}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="">None (Standalone)</option>
+                    {projects?.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="pt-4 flex justify-end gap-3">
+                  <button 
+                    type="button" 
+                    onClick={() => setEditingTask(null)}
+                    className="px-5 py-2 text-slate-400 hover:text-white transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    type="submit" 
+                    disabled={updateTask.isPending || !editingTask.title.trim()}
+                    className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-colors disabled:opacity-50"
+                  >
+                    Save Changes
+                  </button>
+                </div>
+              </form>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ── Add Task Modal ─────────────────────────────────── */}
-      <Modal open={addTaskOpen} onClose={() => setAddTaskOpen(false)} title="➕ New Task">
-        <form onSubmit={handleAddTask} className="flex flex-col gap-4">
-          <input required placeholder="Task title…" value={taskForm.title}
-            onChange={e => setTaskForm(f => ({ ...f, title: e.target.value }))} className={inp} />
-          <input type="date" value={taskForm.assigned_date}
-            onChange={e => setTaskForm(f => ({ ...f, assigned_date: e.target.value }))} className={inp} />
-          <select value={taskForm.project_id} onChange={e => setTaskForm(f => ({ ...f, project_id: e.target.value }))} className={inp}>
-            <option value="">— Standalone —</option>
-            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-          <div className="flex gap-2 justify-end">
-            <button type="button" onClick={() => setAddTaskOpen(false)} className="px-4 py-2 text-sm text-[var(--text-dim)] hover:text-[var(--text)] transition-colors">Cancel</button>
-            <motion.button whileTap={{ scale: 0.95 }} type="submit" disabled={addMut.isPending}
-              className="px-5 py-2 bg-[var(--purple-d)] hover:bg-[var(--purple)] text-white text-sm font-semibold rounded-xl transition-colors">
-              Add Task
-            </motion.button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* ── Edit Task Modal ────────────────────────────────── */}
-      <Modal open={!!editTask} onClose={() => setEditTask(null)} title="✎ Edit Task">
-        {editTask && (
-          <form onSubmit={handleEditTask} className="flex flex-col gap-4">
-            <input required value={editTask.title} onChange={e => setEditTask(t => ({ ...t, title: e.target.value }))} className={inp} />
-            <select value={editTask.status} onChange={e => {
-                const newStatus = e.target.value
-                setEditTask(t => ({ 
-                  ...t, 
-                  status: newStatus,
-                  assigned_date: newStatus === 'in_progress' ? today : t.assigned_date
-                }))
-              }} className={inp}>
-              <option value="todo">To Do</option>
-              <option value="in_progress">In Progress</option>
-              <option value="done">Done</option>
-            </select>
-            <input type="date" value={editTask.assigned_date || ''} onChange={e => setEditTask(t => ({ ...t, assigned_date: e.target.value }))} className={inp} />
-            <select value={editTask.project_id || ''} onChange={e => setEditTask(t => ({ ...t, project_id: e.target.value }))} className={inp}>
-              <option value="">— Standalone —</option>
-              {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-            <div className="flex gap-2 justify-end">
-              <button type="button" onClick={() => setEditTask(null)} className="px-4 py-2 text-sm text-[var(--text-dim)] hover:text-[var(--text)] transition-colors">Cancel</button>
-              <motion.button whileTap={{ scale: 0.95 }} type="submit" disabled={editMut.isPending}
-                className="px-5 py-2 bg-[var(--purple-d)] hover:bg-[var(--purple)] text-white text-sm font-semibold rounded-xl transition-colors">
-                Save
-              </motion.button>
-            </div>
-          </form>
+      {/* Add Task Modal */}
+      <AnimatePresence>
+        {isAddingTask && (
+          <motion.div 
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={(e) => { if (e.target === e.currentTarget) setIsAddingTask(false) }}
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl"
+            >
+              <div className="p-6 border-b border-slate-800 flex justify-between items-center">
+                <h2 className="text-xl font-bold text-white">Add New Task</h2>
+                <button onClick={() => setIsAddingTask(false)} className="text-slate-500 hover:text-white">✕</button>
+              </div>
+              <form 
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  createTask.mutate({
+                    title: newTask.title,
+                    assigned_date: newTask.assigned_date || null,
+                    project_id: newTask.project_id || null
+                  });
+                }}
+                className="p-6 space-y-4"
+              >
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-1">Task Name</label>
+                  <input 
+                    type="text" 
+                    required
+                    value={newTask.title}
+                    onChange={e => setNewTask({ ...newTask, title: e.target.value })}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-1">Assigned Date (Optional)</label>
+                  <input 
+                    type="date" 
+                    value={newTask.assigned_date}
+                    onChange={e => setNewTask({ ...newTask, assigned_date: e.target.value })}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-1">Project Association</label>
+                  <select 
+                    value={newTask.project_id}
+                    onChange={e => setNewTask({ ...newTask, project_id: e.target.value })}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="">None (Standalone)</option>
+                    {projects?.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="pt-4 flex justify-end gap-3">
+                  <button 
+                    type="button" 
+                    onClick={() => setIsAddingTask(false)}
+                    className="px-5 py-2 text-slate-400 hover:text-white transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    type="submit" 
+                    disabled={createTask.isPending || !newTask.title.trim()}
+                    className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-colors disabled:opacity-50"
+                  >
+                    Create Task
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
         )}
-      </Modal>
+      </AnimatePresence>
 
-      {/* ── Add Project Modal ──────────────────────────────── */}
-      <Modal open={addProjOpen} onClose={() => setAddProjOpen(false)} title="📁 New Project">
-        <form onSubmit={handleAddProject} className="flex flex-col gap-4">
-          <input required placeholder="Project name…" value={projForm.name}
-            onChange={e => setProjForm(f => ({ ...f, name: e.target.value }))} className={inp} />
-          <textarea placeholder="Description (optional)…" rows={3} value={projForm.description}
-            onChange={e => setProjForm(f => ({ ...f, description: e.target.value }))}
-            className={inp + ' resize-none'} />
-          <div className="flex gap-2 justify-end">
-            <button type="button" onClick={() => setAddProjOpen(false)} className="px-4 py-2 text-sm text-[var(--text-dim)] hover:text-[var(--text)] transition-colors">Cancel</button>
-            <motion.button whileTap={{ scale: 0.95 }} type="submit" disabled={addProjMut.isPending}
-              className="px-5 py-2 bg-[var(--purple-d)] hover:bg-[var(--purple)] text-white text-sm font-semibold rounded-xl transition-colors">
-              Create
-            </motion.button>
-          </div>
-        </form>
-      </Modal>
-    </div>
-  )
+      {/* Add Project Modal */}
+      <AnimatePresence>
+        {isAddingProject && (
+          <motion.div 
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={(e) => { if (e.target === e.currentTarget) setIsAddingProject(false) }}
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl"
+            >
+              <div className="p-6 border-b border-slate-800 flex justify-between items-center">
+                <h2 className="text-xl font-bold text-white">Add New Project</h2>
+                <button onClick={() => setIsAddingProject(false)} className="text-slate-500 hover:text-white">✕</button>
+              </div>
+              <form 
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  createProject.mutate({
+                    name: newProject.name,
+                    description: newProject.description || null
+                  });
+                }}
+                className="p-6 space-y-4"
+              >
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-1">Project Name</label>
+                  <input 
+                    type="text" 
+                    required
+                    value={newProject.name}
+                    onChange={e => setNewProject({ ...newProject, name: e.target.value })}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-1">Description (Optional)</label>
+                  <textarea 
+                    value={newProject.description}
+                    onChange={e => setNewProject({ ...newProject, description: e.target.value })}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500 h-24 resize-none"
+                  />
+                </div>
+                <div className="pt-4 flex justify-end gap-3">
+                  <button 
+                    type="button" 
+                    onClick={() => setIsAddingProject(false)}
+                    className="px-5 py-2 text-slate-400 hover:text-white transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    type="submit" 
+                    disabled={createProject.isPending || !newProject.name.trim()}
+                    className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-colors disabled:opacity-50"
+                  >
+                    Create Project
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
 }
