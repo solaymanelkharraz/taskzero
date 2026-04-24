@@ -1,4 +1,4 @@
-export const API_BASE = 'http://127.0.0.1:8000/api';
+export const API_BASE = 'https://backend-vq6v.onrender.com/api';
 
 export const fetcher = async (endpoint, options = {}) => {
   const url = `${API_BASE}${endpoint}`;
