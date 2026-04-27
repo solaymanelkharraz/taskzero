@@ -21,7 +21,7 @@ class ProjectController extends Controller
             'tasks as done_tasks' => function ($query) {
                 $query->where('status', 'done');
             }
-        ])->orderBy('name')->get()->map(fn($p) => $this->format($p));
+        ])->orderByRaw("FIELD(priority, 'high', 'medium', 'low')")->orderBy('name')->get()->map(fn($p) => $this->format($p));
 
         return response()->json($projects);
     }
@@ -34,11 +34,32 @@ class ProjectController extends Controller
         $data = $request->validate([
             'name'        => 'required|string|max:120',
             'description' => 'nullable|string',
+            'priority'    => 'nullable|in:high,medium,low',
         ]);
+
+        $data['priority'] = $data['priority'] ?? 'medium';
 
         $project = Project::create($data);
 
-        return response()->json($this->format($project), 201);
+        return response()->json($this->format($project->load('tasks')), 201);
+    }
+
+    /**
+     * PUT /api/projects/{id}
+     */
+    public function update(Request $request, int $id): JsonResponse
+    {
+        $project = Project::findOrFail($id);
+
+        $data = $request->validate([
+            'name'        => 'sometimes|required|string|max:120',
+            'description' => 'nullable|string',
+            'priority'    => 'nullable|in:high,medium,low',
+        ]);
+
+        $project->update($data);
+
+        return response()->json($this->format($project->load('tasks')));
     }
 
     /**
@@ -47,7 +68,6 @@ class ProjectController extends Controller
     public function destroy(int $id): JsonResponse
     {
         $project = Project::findOrFail($id);
-        // Unlink tasks (set project_id = null)
         $project->tasks()->update(['project_id' => null]);
         $project->delete();
 
@@ -58,7 +78,7 @@ class ProjectController extends Controller
     private function format(Project $project): array
     {
         $total = $project->total_tasks ?? $project->tasks()->count();
-        $done  = $project->done_tasks ?? $project->tasks()->where('status', 'done')->count();
+        $done  = $project->done_tasks  ?? $project->tasks()->where('status', 'done')->count();
 
         $stats = [
             'total' => $total,
@@ -72,6 +92,7 @@ class ProjectController extends Controller
             'id'            => $project->id,
             'name'          => $project->name,
             'description'   => $project->description,
+            'priority'      => $project->priority ?? 'medium',
             'created_at'    => $project->created_at?->toISOString(),
             'stats'         => $stats,
             'tasks'         => $project->tasks->map(fn($t) => [

@@ -12,7 +12,7 @@ class Project extends Model
      */
     const UPDATED_AT = null;
 
-    protected $fillable = ['name', 'description'];
+    protected $fillable = ['name', 'description', 'priority'];
 
     public function tasks(): HasMany
     {

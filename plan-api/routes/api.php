@@ -18,6 +18,7 @@ Route::delete('/tasks/{id}',      [TaskController::class, 'destroy']);
 // ── Projects ─────────────────────────────────────────────────
 Route::get('/projects',          [ProjectController::class, 'index']);
 Route::post('/projects',         [ProjectController::class, 'store']);
+Route::put('/projects/{id}',     [ProjectController::class, 'update']);
 Route::delete('/projects/{id}',  [ProjectController::class, 'destroy']);
 
 // ── Ideas (Brain Dump) ───────────────────────────────────────

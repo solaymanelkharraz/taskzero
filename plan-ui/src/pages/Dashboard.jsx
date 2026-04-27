@@ -11,7 +11,7 @@ export default function Dashboard() {
   const [editingTask, setEditingTask] = useState(null);
   
   const [isAddingProject, setIsAddingProject] = useState(false);
-  const [newProject, setNewProject] = useState({ name: '', description: '' });
+  const [newProject, setNewProject] = useState({ name: '', description: '', priority: 'medium' });
 
   const [isAddingTask, setIsAddingTask] = useState(false);
   const [newTask, setNewTask] = useState({ title: '', assigned_date: '', project_id: '' });
@@ -108,8 +108,20 @@ export default function Dashboard() {
     }).then(res => res.json()),
     onSuccess: () => {
       setIsAddingProject(false);
-      setNewProject({ name: '', description: '' });
+      setNewProject({ name: '', description: '', priority: 'medium' });
       toast.success('Project created successfully.');
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+    }
+  });
+
+  const updateProjectPriority = useMutation({
+    mutationFn: ({ id, priority }) => fetch(`${API_BASE}/projects/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ priority })
+    }).then(res => res.json()),
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
     }
   });
@@ -240,44 +252,105 @@ export default function Dashboard() {
         )}
 
         {activeTab === 'projects' && (
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-10">
             <div className="flex justify-end">
-              <button 
+              <button
                 onClick={() => setIsAddingProject(true)}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-colors shadow-lg"
               >
                 + Add Project
               </button>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {projects?.map(project => (
-              <div key={project.id} className="bg-slate-800 rounded-xl p-6 border border-slate-700 flex flex-col justify-between h-full">
-                <div>
-                  <div className="flex justify-between items-start mb-4">
-                    <h3 className="text-xl font-bold text-white">{project.name}</h3>
+
+            {/* Priority config */}
+            {[{
+              key: 'high',
+              label: '🔥 Critical Focus',
+              dot: '#ff2d6f',
+              glow: 'rgba(255,45,111,0.25)',
+              border: 'rgba(255,45,111,0.35)',
+              badge: { bg: 'rgba(255,45,111,0.15)', text: '#ff2d6f', label: 'HIGH' }
+            }, {
+              key: 'medium',
+              label: '⚡ Standard',
+              dot: '#ffaa00',
+              glow: 'rgba(255,170,0,0.25)',
+              border: 'rgba(255,170,0,0.35)',
+              badge: { bg: 'rgba(255,170,0,0.15)', text: '#ffaa00', label: 'MEDIUM' }
+            }, {
+              key: 'low',
+              label: '🧊 Backlog',
+              dot: '#00f2ff',
+              glow: 'rgba(0,242,255,0.25)',
+              border: 'rgba(0,242,255,0.35)',
+              badge: { bg: 'rgba(0,242,255,0.15)', text: '#00f2ff', label: 'LOW' }
+            }].map(({ key, label, dot, glow, border, badge }) => {
+              const group = (projects || []).filter(p => (p.priority || 'medium') === key);
+              return (
+                <div key={key}>
+                  {/* Section Header */}
+                  <div className="flex items-center gap-3 mb-4">
+                    <span style={{ background: dot, boxShadow: `0 0 8px ${dot}` }} className="inline-block w-2.5 h-2.5 rounded-full" />
+                    <h2 className="text-base font-bold text-slate-200 tracking-wide uppercase">{label}</h2>
+                    <span className="ml-1 text-xs font-semibold text-slate-500 bg-slate-800 px-2 py-0.5 rounded-full">{group.length}</span>
+                    <div className="flex-1 h-px bg-slate-800 ml-2" />
                   </div>
-                  <div className="flex gap-4 text-sm text-slate-400 mb-6">
-                    <div>Tasks: <span className="text-white">{project.stats.total}</span></div>
-                    <div>Done: <span className="text-emerald-400">{project.stats.done}</span></div>
-                  </div>
-                  <div className="w-full bg-slate-700 rounded-full h-2 mb-6">
-                    <div className="bg-blue-500 h-2 rounded-full" style={{ width: `${project.stats.pct}%` }}></div>
-                  </div>
+
+                  {group.length === 0 ? (
+                    <p className="text-slate-600 text-sm italic pl-1">No projects here yet.</p>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                      {group.map(project => (
+                        <div
+                          key={project.id}
+                          style={{ borderColor: border, background: 'rgba(15,23,42,0.8)' }}
+                          className="rounded-xl p-5 border flex flex-col justify-between h-full transition-all hover:scale-[1.01]"
+                        >
+                          <div>
+                            <div className="flex justify-between items-start mb-3">
+                              <h3 className="text-lg font-bold text-white leading-snug">{project.name}</h3>
+                              {/* Neon Priority Badge */}
+                              <span
+                                style={{ background: badge.bg, color: badge.text, boxShadow: `0 0 8px ${glow}` }}
+                                className="text-[10px] font-black tracking-widest px-2 py-0.5 rounded-full ml-2 shrink-0"
+                              >
+                                {badge.label}
+                              </span>
+                            </div>
+                            {project.description && (
+                              <p className="text-slate-500 text-xs mb-3 line-clamp-2">{project.description}</p>
+                            )}
+                            <div className="flex gap-4 text-xs text-slate-400 mb-4">
+                              <div>Tasks: <span className="text-white font-semibold">{project.stats.total}</span></div>
+                              <div>Done: <span className="text-emerald-400 font-semibold">{project.stats.done}</span></div>
+                              <div>Progress: <span style={{ color: dot }} className="font-semibold">{project.stats.pct}%</span></div>
+                            </div>
+                            <div className="w-full bg-slate-800 rounded-full h-1.5 mb-4 overflow-hidden">
+                              <div
+                                style={{ width: `${project.stats.pct}%`, background: dot, boxShadow: `0 0 6px ${dot}` }}
+                                className="h-1.5 rounded-full transition-all duration-500"
+                              />
+                            </div>
+                          </div>
+                          <div className="mt-auto pt-3 border-t border-slate-800 flex justify-between items-center">
+                            <span className="text-[11px] text-slate-600">
+                              {project.last_activity ? format(new Date(project.last_activity), 'MMM do') : 'No activity'}
+                            </span>
+                            <button
+                              onClick={() => setSelectedProject(project)}
+                              style={{ color: dot }}
+                              className="text-sm font-semibold hover:opacity-75 transition-opacity"
+                            >
+                              Details →
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <div className="mt-auto pt-4 border-t border-slate-700/50 flex justify-between items-center">
-                  <span className="text-xs text-slate-500">
-                    Activity: {project.last_activity ? format(new Date(project.last_activity), 'MMM do, p') : 'Never'}
-                  </span>
-                  <button 
-                    onClick={() => setSelectedProject(project)}
-                    className="text-sm font-medium text-blue-400 hover:text-blue-300"
-                  >
-                    Details →
-                  </button>
-                </div>
-              </div>
-            ))}
-            </div>
+              );
+            })}
           </motion.div>
         )}
       </div>
@@ -503,20 +576,21 @@ export default function Dashboard() {
                 <h2 className="text-xl font-bold text-white">Add New Project</h2>
                 <button onClick={() => setIsAddingProject(false)} className="text-slate-500 hover:text-white">✕</button>
               </div>
-              <form 
+              <form
                 onSubmit={(e) => {
                   e.preventDefault();
                   createProject.mutate({
                     name: newProject.name,
-                    description: newProject.description || null
+                    description: newProject.description || null,
+                    priority: newProject.priority
                   });
                 }}
-                className="p-6 space-y-4"
+                className="p-6 space-y-5"
               >
                 <div>
                   <label className="block text-sm font-medium text-slate-400 mb-1">Project Name</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     required
                     value={newProject.name}
                     onChange={e => setNewProject({ ...newProject, name: e.target.value })}
@@ -525,22 +599,55 @@ export default function Dashboard() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-400 mb-1">Description (Optional)</label>
-                  <textarea 
+                  <textarea
                     value={newProject.description}
                     onChange={e => setNewProject({ ...newProject, description: e.target.value })}
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500 h-24 resize-none"
                   />
                 </div>
-                <div className="pt-4 flex justify-end gap-3">
-                  <button 
-                    type="button" 
+                {/* Priority Pill Toggle */}
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-2">Priority</label>
+                  <div className="flex gap-2">
+                    {[{
+                      value: 'high',
+                      label: '🔥 High',
+                      active: 'bg-[#ff2d6f]/20 border-[#ff2d6f] text-[#ff2d6f]',
+                      inactive: 'border-slate-700 text-slate-500 hover:border-[#ff2d6f]/50'
+                    }, {
+                      value: 'medium',
+                      label: '⚡ Medium',
+                      active: 'bg-[#ffaa00]/20 border-[#ffaa00] text-[#ffaa00]',
+                      inactive: 'border-slate-700 text-slate-500 hover:border-[#ffaa00]/50'
+                    }, {
+                      value: 'low',
+                      label: '🧊 Low',
+                      active: 'bg-[#00f2ff]/20 border-[#00f2ff] text-[#00f2ff]',
+                      inactive: 'border-slate-700 text-slate-500 hover:border-[#00f2ff]/50'
+                    }].map(pill => (
+                      <button
+                        key={pill.value}
+                        type="button"
+                        onClick={() => setNewProject({ ...newProject, priority: pill.value })}
+                        className={`flex-1 py-2 rounded-xl border text-sm font-bold transition-all ${
+                          newProject.priority === pill.value ? pill.active : pill.inactive
+                        }`}
+                      >
+                        {pill.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="pt-2 flex justify-end gap-3">
+                  <button
+                    type="button"
                     onClick={() => setIsAddingProject(false)}
                     className="px-5 py-2 text-slate-400 hover:text-white transition-colors"
                   >
                     Cancel
                   </button>
-                  <button 
-                    type="submit" 
+                  <button
+                    type="submit"
                     disabled={createProject.isPending || !newProject.name.trim()}
                     className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-colors disabled:opacity-50"
                   >
