@@ -9,6 +9,7 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('tasks');
   const [selectedProject, setSelectedProject] = useState(null);
   const [editingTask, setEditingTask] = useState(null);
+  const [editingProject, setEditingProject] = useState(null);
   
   const [isAddingProject, setIsAddingProject] = useState(false);
   const [newProject, setNewProject] = useState({ name: '', description: '', priority: 'medium' });
@@ -115,15 +116,24 @@ export default function Dashboard() {
     }
   });
 
-  const updateProjectPriority = useMutation({
-    mutationFn: ({ id, priority }) => fetch(`${API_BASE}/projects/${id}`, {
+  const updateProject = useMutation({
+    mutationFn: ({ id, data }) => fetch(`${API_BASE}/projects/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ priority })
+      body: JSON.stringify(data)
     }).then(res => res.json()),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['projects'] });
-    }
+    onMutate: async ({ id, data }) => {
+      await queryClient.cancelQueries({ queryKey: ['projects'] });
+      const previous = queryClient.getQueryData(['projects']);
+      queryClient.setQueryData(['projects'], (old) =>
+        old?.map(p => p.id === id ? { ...p, ...data } : p)
+      );
+      setEditingProject(null);
+      toast.success('Project updated.');
+      return { previous };
+    },
+    onError: (err, vars, context) => queryClient.setQueryData(['projects'], context.previous),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['projects'] })
   });
 
   const activeTasks = tasks?.filter(t => t.status !== 'done') || [];
@@ -336,13 +346,21 @@ export default function Dashboard() {
                             <span className="text-[11px] text-slate-600">
                               {project.last_activity ? format(new Date(project.last_activity), 'MMM do') : 'No activity'}
                             </span>
-                            <button
-                              onClick={() => setSelectedProject(project)}
-                              style={{ color: dot }}
-                              className="text-sm font-semibold hover:opacity-75 transition-opacity"
-                            >
-                              Details →
-                            </button>
+                            <div className="flex items-center gap-3">
+                              <button
+                                onClick={() => setEditingProject({ id: project.id, name: project.name, description: project.description || '', priority: project.priority || 'medium' })}
+                                className="text-xs font-semibold text-slate-400 hover:text-white transition-colors"
+                              >
+                                ✏️ Edit
+                              </button>
+                              <button
+                                onClick={() => setSelectedProject(project)}
+                                style={{ color: dot }}
+                                className="text-sm font-semibold hover:opacity-75 transition-opacity"
+                              >
+                                Details →
+                              </button>
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -395,6 +413,110 @@ export default function Dashboard() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Edit Project Modal */}
+      <AnimatePresence>
+        {editingProject && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={(e) => { if (e.target === e.currentTarget) setEditingProject(null) }}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl"
+            >
+              <div className="p-6 border-b border-slate-800 flex justify-between items-center">
+                <h2 className="text-xl font-bold text-white">Edit Project</h2>
+                <button onClick={() => setEditingProject(null)} className="text-slate-500 hover:text-white">✕</button>
+              </div>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  updateProject.mutate({
+                    id: editingProject.id,
+                    data: {
+                      name: editingProject.name,
+                      description: editingProject.description || null,
+                      priority: editingProject.priority
+                    }
+                  });
+                }}
+                className="p-6 space-y-5"
+              >
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-1">Project Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={editingProject.name}
+                    onChange={e => setEditingProject({ ...editingProject, name: e.target.value })}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-1">Description (Optional)</label>
+                  <textarea
+                    value={editingProject.description}
+                    onChange={e => setEditingProject({ ...editingProject, description: e.target.value })}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500 h-24 resize-none"
+                  />
+                </div>
+                {/* Priority Pill Toggle */}
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-2">Priority</label>
+                  <div className="flex gap-2">
+                    {[{
+                      value: 'high',
+                      label: '🔥 High',
+                      active: 'bg-[#ff2d6f]/20 border-[#ff2d6f] text-[#ff2d6f]',
+                      inactive: 'border-slate-700 text-slate-500 hover:border-[#ff2d6f]/50'
+                    }, {
+                      value: 'medium',
+                      label: '⚡ Medium',
+                      active: 'bg-[#ffaa00]/20 border-[#ffaa00] text-[#ffaa00]',
+                      inactive: 'border-slate-700 text-slate-500 hover:border-[#ffaa00]/50'
+                    }, {
+                      value: 'low',
+                      label: '🧊 Low',
+                      active: 'bg-[#00f2ff]/20 border-[#00f2ff] text-[#00f2ff]',
+                      inactive: 'border-slate-700 text-slate-500 hover:border-[#00f2ff]/50'
+                    }].map(pill => (
+                      <button
+                        key={pill.value}
+                        type="button"
+                        onClick={() => setEditingProject({ ...editingProject, priority: pill.value })}
+                        className={`flex-1 py-2 rounded-xl border text-sm font-bold transition-all ${
+                          editingProject.priority === pill.value ? pill.active : pill.inactive
+                        }`}
+                      >
+                        {pill.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="pt-2 flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setEditingProject(null)}
+                    className="px-5 py-2 text-slate-400 hover:text-white transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={updateProject.isPending || !editingProject.name.trim()}
+                    className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-colors disabled:opacity-50"
+                  >
+                    Save Changes
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Edit Task Modal */}
       <AnimatePresence>
         {editingTask && (
