@@ -13,14 +13,29 @@ export default function ProjectDetails() {
 
   const [editingTask, setEditingTask] = useState(null);
   const [isFinishing, setIsFinishing] = useState(false);
+  const [isAddingTask, setIsAddingTask] = useState(false);
+  const [newTask, setNewTask] = useState({ title: '', assigned_date: '' });
   const [completionData, setCompletionData] = useState({ completion_link: '', completion_summary: '' });
 
   const { data: project, isLoading } = useQuery({
     queryKey: ['projects', id],
     queryFn: () => fetch(`${API_BASE}/projects/${id}`).then(res => res.json()),
-    // Leverage cache if available from the global projects query
-    initialData: () => {
-      return queryClient.getQueryData(['projects'])?.find(p => p.id === parseInt(id));
+    initialData: () => queryClient.getQueryData(['projects'])?.find(p => p.id === parseInt(id))
+  });
+
+  const createTask = useMutation({
+    mutationFn: (data) => fetch(`${API_BASE}/tasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...data, project_id: id })
+    }).then(res => res.json()),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects', id] });
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      setIsAddingTask(false);
+      setNewTask({ title: '', assigned_date: '' });
+      toast.success('Task added to project.');
     }
   });
 
@@ -36,6 +51,26 @@ export default function ProjectDetails() {
       queryClient.invalidateQueries({ queryKey: ['tasks'] });
       setEditingTask(null);
       toast.success('Task updated.');
+    }
+  });
+
+  const deleteTask = useMutation({
+    mutationFn: (taskId) => fetch(`${API_BASE}/tasks/${taskId}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects', id] });
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      toast.info('Task removed.');
+    }
+  });
+
+  const deleteProject = useMutation({
+    mutationFn: () => fetch(`${API_BASE}/projects/${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      toast.info('Project deleted.');
+      navigate('/dashboard');
     }
   });
 
@@ -70,13 +105,19 @@ export default function ProjectDetails() {
       <div className="flex flex-col md:flex-row justify-between items-start gap-6 border-b border-slate-800 pb-10">
         <div className="space-y-4">
           <div className="flex items-center gap-3">
-            <button onClick={() => navigate(-1)} className="text-slate-500 hover:text-white transition-colors">← Back</button>
+            <button onClick={() => navigate('/dashboard')} className="text-slate-500 hover:text-white transition-colors">← Back</button>
             <span style={{ background: colors.bg, color: colors.text }} className="px-3 py-1 rounded-full text-[10px] font-black tracking-widest uppercase">
               {project.priority} Priority
             </span>
           </div>
           <h1 className="text-5xl font-black text-white">{project.name}</h1>
           <p className="text-slate-400 text-lg max-w-2xl">{project.description || 'No description provided.'}</p>
+          <button 
+            onClick={() => { if(confirm('Delete project? Tasks will become standalone.')) deleteProject.mutate(); }}
+            className="text-xs font-bold text-red-500 hover:text-red-400 transition-colors uppercase tracking-widest"
+          >
+            🗑️ Delete Project
+          </button>
         </div>
         <div className="flex flex-col items-end gap-4 shrink-0">
           <div className="text-right">
@@ -94,10 +135,18 @@ export default function ProjectDetails() {
 
       {/* Task Management Section */}
       <div className="space-y-6">
-        <h2 className="text-2xl font-bold text-white flex items-center gap-3">
-          <span className="w-2 h-8 bg-blue-600 rounded-full" />
-          Project Tasks
-        </h2>
+        <div className="flex justify-between items-center">
+          <h2 className="text-2xl font-bold text-white flex items-center gap-3">
+            <span className="w-2 h-8 bg-blue-600 rounded-full" />
+            Project Tasks
+          </h2>
+          <button 
+            onClick={() => setIsAddingTask(true)}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all shadow-lg"
+          >
+            + Add Task
+          </button>
+        </div>
         
         <div className="grid gap-4">
           {project.tasks?.length === 0 ? (
@@ -126,6 +175,12 @@ export default function ProjectDetails() {
                   >
                     Edit
                   </button>
+                  <button 
+                    onClick={() => { if(confirm('Delete task?')) deleteTask.mutate(task.id); }}
+                    className="px-4 py-2 bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white text-sm font-bold rounded-lg transition-colors"
+                  >
+                    Delete
+                  </button>
                 </div>
               </div>
             ))
@@ -133,7 +188,59 @@ export default function ProjectDetails() {
         </div>
       </div>
 
-      {/* Inline/Modal Edit Task */}
+      {/* Add Task Modal */}
+      <AnimatePresence>
+        {isAddingTask && (
+          <motion.div 
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={(e) => { if (e.target === e.currentTarget) setIsAddingTask(false) }}
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl"
+            >
+              <div className="p-6 border-b border-slate-800 flex justify-between items-center">
+                <h2 className="text-xl font-bold text-white">Add Task to Project</h2>
+                <button onClick={() => setIsAddingTask(false)} className="text-slate-500 hover:text-white">✕</button>
+              </div>
+              <form 
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  createTask.mutate(newTask);
+                }}
+                className="p-6 space-y-4"
+              >
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-1">Task Name</label>
+                  <input 
+                    type="text" 
+                    required autoFocus
+                    value={newTask.title}
+                    onChange={e => setNewTask({ ...newTask, title: e.target.value })}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-1">Assigned Date (Optional)</label>
+                  <input 
+                    type="date" 
+                    value={newTask.assigned_date}
+                    onChange={e => setNewTask({ ...newTask, assigned_date: e.target.value })}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div className="pt-4 flex justify-end gap-3">
+                  <button type="button" onClick={() => setIsAddingTask(false)} className="text-slate-400 hover:text-white">Cancel</button>
+                  <button type="submit" disabled={!newTask.title.trim()} className="px-6 py-2 bg-blue-600 text-white font-bold rounded-xl disabled:opacity-50">Create Task</button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Edit Task Modal */}
       <AnimatePresence>
         {editingTask && (
           <motion.div 
@@ -253,3 +360,4 @@ export default function ProjectDetails() {
     </motion.div>
   );
 }
+

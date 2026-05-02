@@ -304,6 +304,12 @@ export default function Dashboard() {
                         Edit
                       </button>
                       <button 
+                        onClick={() => { if(confirm('Delete task?')) deleteTask.mutate(task.id); }}
+                        className="px-3 py-1.5 bg-red-600/10 hover:bg-red-600 text-red-400 hover:text-white rounded-lg text-xs font-bold transition-all border border-red-600/20"
+                      >
+                        Delete
+                      </button>
+                      <button 
                         onClick={() => completeTask.mutate(task.id)}
                         className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-black transition-all shadow-lg shadow-emerald-900/20"
                       >
@@ -408,6 +414,18 @@ export default function Dashboard() {
                                 className="text-xs font-semibold text-slate-400 hover:text-white transition-colors"
                               >
                                 ✏️ Edit
+                              </button>
+                              <button
+                                onClick={() => { if(confirm('Delete project? Tasks will become standalone.')) {
+                                  fetch(`${API_BASE}/projects/${project.id}`, { method: 'DELETE' }).then(() => {
+                                    toast.info('Project deleted.');
+                                    queryClient.invalidateQueries({ queryKey: ['projects'] });
+                                    queryClient.invalidateQueries({ queryKey: ['tasks'] });
+                                  });
+                                }}}
+                                className="text-xs font-semibold text-red-500 hover:text-red-400 transition-colors"
+                              >
+                                🗑️ Delete
                               </button>
                               <Link
                                 to={`/projects/${project.id}`}
