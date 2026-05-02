@@ -16,10 +16,13 @@ Route::patch('/tasks/{id}/cycle', [TaskController::class, 'cycle']);
 Route::delete('/tasks/{id}',      [TaskController::class, 'destroy']);
 
 // ── Projects ─────────────────────────────────────────────────
-Route::get('/projects',          [ProjectController::class, 'index']);
-Route::post('/projects',         [ProjectController::class, 'store']);
-Route::put('/projects/{id}',     [ProjectController::class, 'update']);
-Route::delete('/projects/{id}',  [ProjectController::class, 'destroy']);
+Route::get('/projects',                 [ProjectController::class, 'index']);
+Route::get('/projects/history',         [ProjectController::class, 'history']);
+Route::post('/projects',                [ProjectController::class, 'store']);
+Route::get('/projects/{id}',            [ProjectController::class, 'show']);
+Route::put('/projects/{id}',            [ProjectController::class, 'update']);
+Route::post('/projects/{id}/complete',  [ProjectController::class, 'complete']);
+Route::delete('/projects/{id}',         [ProjectController::class, 'destroy']);
 
 // ── Ideas (Brain Dump) ───────────────────────────────────────
 Route::get('/ideas',                     [IdeaController::class, 'index']);

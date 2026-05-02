@@ -14,14 +14,76 @@ class ProjectController extends Controller
      */
     public function index(): JsonResponse
     {
-        $projects = Project::with(['tasks' => function ($query) {
+        $projects = Project::whereNull('completed_at')
+            ->with(['tasks' => function ($query) {
+                $query->orderBy('created_at', 'desc');
+            }])->withCount([
+                'tasks as total_tasks',
+                'tasks as done_tasks' => function ($query) {
+                    $query->where('status', 'done');
+                }
+            ])->orderByRaw("FIELD(priority, 'high', 'medium', 'low')")
+            ->orderBy('name')
+            ->get()
+            ->map(fn($p) => $this->format($p));
+
+        return response()->json($projects);
+    }
+
+    /**
+     * GET /api/projects/{id}
+     */
+    public function show(int $id): JsonResponse
+    {
+        $project = Project::with(['tasks' => function ($query) {
             $query->orderBy('created_at', 'desc');
         }])->withCount([
             'tasks as total_tasks',
             'tasks as done_tasks' => function ($query) {
                 $query->where('status', 'done');
             }
-        ])->orderByRaw("FIELD(priority, 'high', 'medium', 'low')")->orderBy('name')->get()->map(fn($p) => $this->format($p));
+        ])->findOrFail($id);
+
+        return response()->json($this->format($project));
+    }
+
+    /**
+     * POST /api/projects/{id}/complete
+     */
+    public function complete(Request $request, int $id): JsonResponse
+    {
+        $project = Project::findOrFail($id);
+
+        $data = $request->validate([
+            'completion_link'    => 'nullable|string',
+            'completion_summary' => 'nullable|string',
+        ]);
+
+        $project->update([
+            'completed_at'       => now(),
+            'completion_link'    => $data['completion_link'],
+            'completion_summary' => $data['completion_summary'],
+        ]);
+
+        return response()->json($this->format($project->load('tasks')));
+    }
+
+    /**
+     * GET /api/projects/history
+     */
+    public function history(): JsonResponse
+    {
+        $projects = Project::whereNotNull('completed_at')
+            ->with(['tasks'])
+            ->withCount([
+                'tasks as total_tasks',
+                'tasks as done_tasks' => function ($query) {
+                    $query->where('status', 'done');
+                }
+            ])
+            ->orderBy('completed_at', 'desc')
+            ->get()
+            ->map(fn($p) => $this->format($p));
 
         return response()->json($projects);
     }
@@ -89,20 +151,24 @@ class ProjectController extends Controller
         $lastActivity = $project->tasks->first()?->created_at?->toISOString() ?? null;
 
         return [
-            'id'            => $project->id,
-            'name'          => $project->name,
-            'description'   => $project->description,
-            'priority'      => $project->priority ?? 'medium',
-            'created_at'    => $project->created_at?->toISOString(),
-            'stats'         => $stats,
-            'tasks'         => $project->tasks->map(fn($t) => [
+            'id'                 => $project->id,
+            'name'               => $project->name,
+            'description'        => $project->description,
+            'priority'           => $project->priority ?? 'medium',
+            'created_at'         => $project->created_at?->toISOString(),
+            'completed_at'       => $project->completed_at?->toISOString(),
+            'completion_link'    => $project->completion_link,
+            'completion_summary' => $project->completion_summary,
+            'stats'              => $stats,
+            'tasks'              => $project->tasks->map(fn($t) => [
                 'id'            => $t->id,
                 'title'         => $t->title,
                 'status'        => $t->status,
                 'assigned_date' => $t->assigned_date?->format('Y-m-d'),
                 'created_at'    => $t->created_at?->toISOString(),
+                'project_id'    => $t->project_id,
             ]),
-            'last_activity' => $lastActivity,
+            'last_activity'      => $lastActivity,
         ];
     }
 }

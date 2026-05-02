@@ -9,6 +9,7 @@ import Ideas     from './pages/Ideas'
 import Calendar  from './pages/Calendar'
 import History   from './pages/History'
 import Habits    from './pages/Habits'
+import ProjectDetails from './pages/ProjectDetails'
 import { Toaster } from 'sonner'
 import { API_BASE } from './lib/api'
 import CommandPalette from './components/CommandPalette'
@@ -56,6 +57,7 @@ function AppRoutes() {
           <Route element={<DashboardLayout />}>
             <Route path="/dashboard"    element={<DashboardOverview />} />
             <Route path="/control-room" element={<Dashboard />} />
+            <Route path="/projects/:id" element={<ProjectDetails />} />
             <Route path="/habits"       element={<Habits />} />
             <Route path="/ideas"        element={<Ideas />} />
             <Route path="/calendar"     element={<Calendar />} />

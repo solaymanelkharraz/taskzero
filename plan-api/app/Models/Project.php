@@ -12,7 +12,11 @@ class Project extends Model
      */
     const UPDATED_AT = null;
 
-    protected $fillable = ['name', 'description', 'priority'];
+    protected $fillable = ['name', 'description', 'priority', 'completed_at', 'completion_link', 'completion_summary'];
+
+    protected $casts = [
+        'completed_at' => 'datetime',
+    ];
 
     public function tasks(): HasMany
     {

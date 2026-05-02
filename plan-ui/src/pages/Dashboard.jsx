@@ -3,11 +3,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, AnimatePresence } from 'framer-motion'
 import { format } from 'date-fns'
 import { toast } from 'sonner'
+import { Link, useNavigate } from 'react-router-dom'
 import { API_BASE } from '../lib/api'
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('tasks');
-  const [selectedProject, setSelectedProject] = useState(null);
   const [editingTask, setEditingTask] = useState(null);
   const [editingProject, setEditingProject] = useState(null);
   
@@ -17,7 +18,9 @@ export default function Dashboard() {
   const [isAddingTask, setIsAddingTask] = useState(false);
   const [newTask, setNewTask] = useState({ title: '', assigned_date: '', project_id: '' });
 
-  const [sortBy, setSortBy] = useState('assigned_date'); // 'assigned_date', 'project', 'overdue'
+  const [sortBy, setSortBy] = useState('assigned_date'); // 'assigned_date', 'overdue'
+  const [projectFilter, setProjectFilter] = useState('all'); // 'all', 'standalone', or project_id
+  const [showFloatingOnly, setShowFloatingOnly] = useState(false);
 
   const queryClient = useQueryClient();
   const { data: tasks } = useQuery({ 
@@ -138,8 +141,21 @@ export default function Dashboard() {
 
   const activeTasks = tasks?.filter(t => t.status !== 'done') || [];
   
-  const sortedTasks = [...activeTasks].sort((a, b) => {
-    if (sortBy === 'project') return (a.project_name || '').localeCompare(b.project_name || '');
+  // Apply Filters
+  let filteredTasks = activeTasks;
+  
+  if (projectFilter === 'standalone') {
+    filteredTasks = filteredTasks.filter(t => !t.project_id);
+  } else if (projectFilter !== 'all') {
+    filteredTasks = filteredTasks.filter(t => t.project_id === parseInt(projectFilter));
+  }
+
+  if (showFloatingOnly) {
+    filteredTasks = filteredTasks.filter(t => !t.assigned_date);
+  }
+
+  // Apply Sorting
+  const sortedTasks = [...filteredTasks].sort((a, b) => {
     if (sortBy === 'overdue') {
       const aDate = a.assigned_date || '9999-12-31';
       const bDate = b.assigned_date || '9999-12-31';
@@ -176,88 +192,128 @@ export default function Dashboard() {
 
       <div className="mt-8">
         {activeTab === 'tasks' && (
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-            <div className="flex justify-between items-center mb-4">
-              <button 
-                onClick={() => setIsAddingTask(true)}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-colors shadow-lg"
-              >
-                + Add Task
-              </button>
-              <select 
-                value={sortBy} 
-                onChange={e => setSortBy(e.target.value)}
-                className="bg-slate-800 border border-slate-700 text-white rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
-              >
-                <option value="assigned_date">Sort by Scheduled Time</option>
-                <option value="overdue">Sort by Overdue</option>
-                <option value="project">Sort by Project</option>
-              </select>
-            </div>
-            {sortedTasks.map(task => (
-              <div key={task.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-5 bg-slate-800 rounded-xl shadow-lg border border-slate-700 hover:border-blue-500 transition-colors gap-4">
-                <div>
-                  <h3 className="text-lg font-bold text-white">{task.title}</h3>
-                  <div className="flex gap-4 text-sm mt-1">
-                    <span className={`px-2 py-0.5 rounded text-xs ${
-                      task.status === 'in_progress' ? 'bg-blue-500/20 text-blue-400' : 'bg-slate-500/20 text-slate-400'
-                    }`}>
-                      {task.status.replace('_', ' ').toUpperCase()}
-                    </span>
-                    <span className="text-slate-400">{task.project_name || 'Standalone'}</span>
-                    {task.assigned_date && (
-                      <span className={`${task.assigned_date < format(new Date(), 'yyyy-MM-dd') ? 'text-red-400 font-bold' : 'text-slate-500'}`}>
-                        {task.assigned_date}
-                      </span>
-                    )}
-                  </div>
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-800/50 p-6 rounded-2xl border border-slate-800">
+              <div className="flex flex-wrap items-center gap-4">
+                <button 
+                  onClick={() => setIsAddingTask(true)}
+                  className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-blue-900/20"
+                >
+                  + Add Task
+                </button>
+                
+                <div className="h-8 w-px bg-slate-700 hidden md:block" />
+
+                {/* Project Filter */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-black uppercase tracking-widest text-slate-500">Project</span>
+                  <select 
+                    value={projectFilter}
+                    onChange={e => setProjectFilter(e.target.value)}
+                    className="bg-slate-900 border border-slate-700 text-white text-sm rounded-xl px-4 py-2 outline-none focus:border-blue-500 transition-colors"
+                  >
+                    <option value="all">All Projects</option>
+                    <option value="standalone">Standalone Only</option>
+                    {projects?.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {task.assigned_date !== format(new Date(), 'yyyy-MM-dd') && (
-                    <button 
-                      onClick={() => {
-                        fetch(`${API_BASE}/tasks/${task.id}`, {
-                          method: 'PUT',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ assigned_date: format(new Date(), 'yyyy-MM-dd') })
-                        }).then(() => {
-                          toast.success('Task moved to Today.');
-                          queryClient.invalidateQueries({ queryKey: ['tasks'] });
-                        });
-                      }}
-                      className="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors"
-                    >
-                      Work Today
-                    </button>
-                  )}
-                  <button 
-                    onClick={() => {
-                      setEditingTask({
-                        id: task.id,
-                        title: task.title,
-                        assigned_date: task.assigned_date || '',
-                        project_id: task.project_id || ''
-                      });
-                    }}
-                    className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm font-medium transition-colors"
-                  >
-                    Edit
-                  </button>
-                  <button 
-                    onClick={() => { if(confirm('Delete task?')) deleteTask.mutate(task.id); }}
-                    className="px-3 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg text-sm font-medium transition-colors"
-                  >
-                    Delete
-                  </button>
-                  <button 
-                    onClick={() => completeTask.mutate(task.id)}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-medium transition-colors"
-                  >
-                    Done
-                  </button>
-                </div>
+
+                {/* Floating Tasks Toggle */}
+                <button
+                  onClick={() => setShowFloatingOnly(!showFloatingOnly)}
+                  className={`px-4 py-2 rounded-xl text-sm font-bold border transition-all ${
+                    showFloatingOnly 
+                    ? 'bg-orange-500/10 border-orange-500/50 text-orange-400' 
+                    : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'
+                  }`}
+                >
+                  {showFloatingOnly ? '🎯 Showing Floating Only' : '☁️ Show Floating Only'}
+                </button>
               </div>
-            ))}
+
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-black uppercase tracking-widest text-slate-500">Sort</span>
+                <select 
+                  value={sortBy} 
+                  onChange={e => setSortBy(e.target.value)}
+                  className="bg-slate-900 border border-slate-700 text-white text-sm rounded-xl px-4 py-2 outline-none focus:border-blue-500 transition-colors"
+                >
+                  <option value="assigned_date">Scheduled Time</option>
+                  <option value="overdue">Overdue First</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="grid gap-3">
+              {sortedTasks.length === 0 ? (
+                <div className="text-center py-20 bg-slate-800/30 border-2 border-dashed border-slate-800 rounded-3xl">
+                  <p className="text-slate-500 font-medium">No tasks match your current filters.</p>
+                </div>
+              ) : (
+                sortedTasks.map(task => (
+                  <div key={task.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-5 bg-slate-800 rounded-2xl shadow-sm border border-slate-700/50 hover:border-blue-500/50 transition-all gap-4 group">
+                    <div className="flex items-start gap-4">
+                      <div className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${task.status === 'in_progress' ? 'bg-blue-500' : 'bg-slate-500'}`} />
+                      <div>
+                        <h3 className="text-lg font-bold text-white group-hover:text-blue-100 transition-colors">{task.title}</h3>
+                        <div className="flex flex-wrap items-center gap-3 text-xs mt-1.5">
+                          <span className="text-slate-500 font-bold bg-slate-900/50 px-2 py-0.5 rounded uppercase tracking-wider">
+                            {task.project_name || 'Standalone'}
+                          </span>
+                          {task.assigned_date ? (
+                            <span className={`font-bold ${task.assigned_date < format(new Date(), 'yyyy-MM-dd') ? 'text-red-400' : 'text-slate-500'}`}>
+                              📅 {task.assigned_date}
+                            </span>
+                          ) : (
+                            <span className="text-orange-500/70 font-bold">☁️ Floating</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">
+                      {task.assigned_date !== format(new Date(), 'yyyy-MM-dd') && (
+                        <button 
+                          onClick={() => {
+                            fetch(`${API_BASE}/tasks/${task.id}`, {
+                              method: 'PUT',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ assigned_date: format(new Date(), 'yyyy-MM-dd') })
+                            }).then(() => {
+                              toast.success('Task moved to Today.');
+                              queryClient.invalidateQueries({ queryKey: ['tasks'] });
+                            });
+                          }}
+                          className="px-3 py-1.5 bg-blue-600/10 hover:bg-blue-600 text-blue-400 hover:text-white rounded-lg text-xs font-black transition-all border border-blue-600/20"
+                        >
+                          TODAY
+                        </button>
+                      )}
+                      <button 
+                        onClick={() => {
+                          setEditingTask({
+                            id: task.id,
+                            title: task.title,
+                            assigned_date: task.assigned_date || '',
+                            project_id: task.project_id || ''
+                          });
+                        }}
+                        className="px-3 py-1.5 bg-slate-700/50 hover:bg-slate-700 text-white rounded-lg text-xs font-bold transition-colors"
+                      >
+                        Edit
+                      </button>
+                      <button 
+                        onClick={() => completeTask.mutate(task.id)}
+                        className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-black transition-all shadow-lg shadow-emerald-900/20"
+                      >
+                        DONE
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </motion.div>
         )}
 
@@ -353,13 +409,13 @@ export default function Dashboard() {
                               >
                                 ✏️ Edit
                               </button>
-                              <button
-                                onClick={() => setSelectedProject(project)}
+                              <Link
+                                to={`/projects/${project.id}`}
                                 style={{ color: dot }}
                                 className="text-sm font-semibold hover:opacity-75 transition-opacity"
                               >
                                 Details →
-                              </button>
+                              </Link>
                             </div>
                           </div>
                         </div>
@@ -372,47 +428,6 @@ export default function Dashboard() {
           </motion.div>
         )}
       </div>
-
-      {/* Project Details Modal */}
-      <AnimatePresence>
-        {selectedProject && (
-          <motion.div 
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-            onClick={(e) => { if (e.target === e.currentTarget) setSelectedProject(null) }}
-          >
-            <motion.div 
-              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl"
-            >
-              <div className="p-6 border-b border-slate-800 flex justify-between items-start">
-                <div>
-                  <h2 className="text-2xl font-bold text-white">{selectedProject.name}</h2>
-                  <p className="text-slate-400 mt-2">{selectedProject.description || 'No description provided.'}</p>
-                </div>
-                <button onClick={() => setSelectedProject(null)} className="text-slate-500 hover:text-white">✕</button>
-              </div>
-              <div className="p-6 max-h-[60vh] overflow-y-auto">
-                <h3 className="text-lg font-semibold text-slate-200 mb-4">Tasks</h3>
-                {selectedProject.tasks?.length === 0 ? (
-                  <p className="text-slate-500">No tasks in this project.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {selectedProject.tasks?.map(task => (
-                      <div key={task.id} className="flex justify-between p-3 bg-slate-800 rounded-lg border border-slate-700/50">
-                        <span className="text-slate-200">{task.title}</span>
-                        <span className={`text-xs px-2 py-1 rounded ${task.status === 'done' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
-                          {task.status}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* Edit Project Modal */}
       <AnimatePresence>
@@ -784,3 +799,4 @@ export default function Dashboard() {
     </motion.div>
   );
 }
+
