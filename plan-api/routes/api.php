@@ -19,9 +19,9 @@ Route::delete('/tasks/{id}',      [TaskController::class, 'destroy']);
 Route::get('/projects',                 [ProjectController::class, 'index']);
 Route::get('/projects/history',         [ProjectController::class, 'history']);
 Route::post('/projects',                [ProjectController::class, 'store']);
+Route::post('/projects/complete/{id}',  [ProjectController::class, 'complete']);
 Route::get('/projects/{id}',            [ProjectController::class, 'show']);
 Route::put('/projects/{id}',            [ProjectController::class, 'update']);
-Route::post('/projects/{id}/complete',  [ProjectController::class, 'complete']);
 Route::delete('/projects/{id}',         [ProjectController::class, 'destroy']);
 
 // ── Ideas (Brain Dump) ───────────────────────────────────────
@@ -47,3 +47,4 @@ Route::post('/events',                   [\App\Http\Controllers\Api\EventControl
 // ── Misc ─────────────────────────────────────────────────────
 Route::get('/week',   [WeekController::class, 'index']);
 Route::post('/sweep', SweepController::class);
+Route::get('/ping', function() { return response()->json(['pong' => true, 'time' => now()]); });
