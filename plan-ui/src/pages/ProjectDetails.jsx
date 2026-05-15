@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 import { API_BASE } from '../lib/api'
+import * as api from '../api/client'
 
 export default function ProjectDetails() {
   const { id } = useParams();
@@ -19,16 +20,12 @@ export default function ProjectDetails() {
 
   const { data: project, isLoading } = useQuery({
     queryKey: ['projects', id],
-    queryFn: () => fetch(`${API_BASE}/projects/${id}`).then(res => res.json()),
+    queryFn: () => api.getProject(id).then(res => res.data),
     initialData: () => queryClient.getQueryData(['projects'])?.find(p => p.id === parseInt(id))
   });
 
   const createTask = useMutation({
-    mutationFn: (data) => fetch(`${API_BASE}/tasks`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...data, project_id: id })
-    }).then(res => res.json()),
+    mutationFn: (data) => api.createTask({ ...data, project_id: id }).then(res => res.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects', id] });
       queryClient.invalidateQueries({ queryKey: ['projects'] });
@@ -40,11 +37,7 @@ export default function ProjectDetails() {
   });
 
   const updateTask = useMutation({
-    mutationFn: ({ taskId, data }) => fetch(`${API_BASE}/tasks/${taskId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    }).then(res => res.json()),
+    mutationFn: ({ taskId, data }) => api.updateTask(taskId, data).then(res => res.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects', id] });
       queryClient.invalidateQueries({ queryKey: ['projects'] });
@@ -55,7 +48,7 @@ export default function ProjectDetails() {
   });
 
   const deleteTask = useMutation({
-    mutationFn: (taskId) => fetch(`${API_BASE}/tasks/${taskId}`, { method: 'DELETE' }),
+    mutationFn: (taskId) => api.deleteTask(taskId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects', id] });
       queryClient.invalidateQueries({ queryKey: ['projects'] });
@@ -65,7 +58,7 @@ export default function ProjectDetails() {
   });
 
   const deleteProject = useMutation({
-    mutationFn: () => fetch(`${API_BASE}/projects/${id}`, { method: 'DELETE' }),
+    mutationFn: () => api.deleteProject(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       queryClient.invalidateQueries({ queryKey: ['tasks'] });
@@ -75,11 +68,7 @@ export default function ProjectDetails() {
   });
 
   const completeProject = useMutation({
-    mutationFn: (data) => fetch(`${API_BASE}/projects/${id}/complete`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    }).then(res => res.json()),
+    mutationFn: (data) => api.completeProject(id, data).then(res => res.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       queryClient.invalidateQueries({ queryKey: ['projects', id] });
