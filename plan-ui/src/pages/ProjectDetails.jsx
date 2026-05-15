@@ -69,7 +69,8 @@ export default function ProjectDetails() {
 
   const completeProject = useMutation({
     mutationFn: (data) => {
-      console.log(`Completing project ${id}...`, data);
+      const url = `${API_BASE}/projects/complete/${id}`;
+      console.log(`Hitting URL: ${url}`, data);
       return api.completeProject(id, data).then(res => res.data);
     },
     onSuccess: () => {
