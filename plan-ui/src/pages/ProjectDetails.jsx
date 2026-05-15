@@ -68,12 +68,20 @@ export default function ProjectDetails() {
   });
 
   const completeProject = useMutation({
-    mutationFn: (data) => api.completeProject(id, data).then(res => res.data),
+    mutationFn: (data) => {
+      console.log(`Completing project ${id}...`, data);
+      return api.completeProject(id, data).then(res => res.data);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       queryClient.invalidateQueries({ queryKey: ['projects', id] });
       toast.success('Project marked as finished!');
       navigate('/dashboard');
+    },
+    onError: (err) => {
+      console.error('Project completion failed:', err);
+      const msg = err.response?.data?.message || err.message || 'Check connection';
+      toast.error(`Error: ${msg}`);
     }
   });
 
@@ -328,6 +336,7 @@ export default function ProjectDetails() {
 
                 <div className="flex flex-col gap-3 pt-4">
                   <button 
+                    type="button"
                     onClick={() => completeProject.mutate(completionData)}
                     disabled={completeProject.isPending}
                     className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-2xl shadow-lg transition-all"

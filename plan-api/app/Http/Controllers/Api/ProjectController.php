@@ -50,9 +50,17 @@ class ProjectController extends Controller
     /**
      * POST /api/projects/{id}/complete
      */
-    public function complete(Request $request, int $id): JsonResponse
+    public function complete(Request $request, $id): JsonResponse
     {
-        $project = Project::findOrFail($id);
+        $project = Project::find($id);
+
+        if (!$project) {
+            return response()->json([
+                'error' => 'Project not found',
+                'id_received' => $id,
+                'message' => 'The project you are trying to complete does not exist in the database.'
+            ], 404);
+        }
 
         $data = $request->validate([
             'completion_link'    => 'nullable|string',
@@ -61,8 +69,8 @@ class ProjectController extends Controller
 
         $project->update([
             'completed_at'       => now(),
-            'completion_link'    => $data['completion_link'],
-            'completion_summary' => $data['completion_summary'],
+            'completion_link'    => $data['completion_link'] ?? null,
+            'completion_summary' => $data['completion_summary'] ?? null,
         ]);
 
         return response()->json($this->format($project->load('tasks')));
