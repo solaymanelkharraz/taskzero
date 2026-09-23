@@ -13,7 +13,7 @@ class SweepController extends Controller
      */
     public function __invoke(): JsonResponse
     {
-        $swept = Task::where('assigned_date', '<', now()->toDateString())
+        $swept = Task::where('assigned_date', '<', now(config('app.timezone', 'UTC'))->toDateString())
             ->where('status', '!=', 'done')
             ->update(['assigned_date' => null]);
 

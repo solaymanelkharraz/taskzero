@@ -15,8 +15,9 @@ class WeekController extends Controller
     public function index(): JsonResponse
     {
         $week = [];
-        $startDate = Carbon::today();
-        $endDate = Carbon::today()->addDays(6);
+        $tz = config('app.timezone', 'UTC');
+        $startDate = Carbon::today($tz);
+        $endDate = Carbon::today($tz)->addDays(6);
 
         $counts = Task::whereBetween('assigned_date', [$startDate->format('Y-m-d'), $endDate->format('Y-m-d')])
             ->where('status', '!=', 'done')
@@ -26,7 +27,7 @@ class WeekController extends Controller
             ->pluck('count', 'assigned_date');
 
         for ($i = 0; $i < 7; $i++) {
-            $date  = Carbon::today()->addDays($i);
+            $date  = Carbon::today($tz)->addDays($i);
             $dateStr = $date->format('Y-m-d');
             
             $week[] = [

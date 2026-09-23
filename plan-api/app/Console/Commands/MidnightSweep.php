@@ -13,7 +13,7 @@ class MidnightSweep extends Command
 
     public function handle(): int
     {
-        $swept = Task::where('assigned_date', '<', Carbon::today())
+        $swept = Task::where('assigned_date', '<', Carbon::today(config('app.timezone', 'UTC')))
             ->where('status', '!=', 'done')
             ->update(['assigned_date' => null]);
 

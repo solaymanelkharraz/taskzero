@@ -62,7 +62,7 @@ class HabitController extends Controller
             'date' => 'nullable|date',
         ]);
 
-        $date = $data['date'] ?? Carbon::today()->toDateString();
+        $date = $data['date'] ?? Carbon::today(config('app.timezone', 'UTC'))->toDateString();
 
         // Check if log exists
         $log = HabitLog::firstOrCreate([
