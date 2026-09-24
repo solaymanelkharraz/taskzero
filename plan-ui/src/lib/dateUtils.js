@@ -1,22 +1,25 @@
 /**
- * Helper utilities to guarantee date operations strictly use UTC (GMT / UTC+0).
- * Prevents browser/OS timezone discrepancies (e.g. outdated GMT+1 offsets for Morocco)
- * from shifting dates or overwriting task assigned dates.
+ * Returns a Date object shifted so that its local time representation matches current UTC/GMT time.
+ * Solves OS/browser timezone offsets (such as Morocco GMT+1 legacy browser offsets)
+ * so date-fns and JS formatting always produce the correct GMT date and header titles.
  */
+export function getNowUTC(d = new Date()) {
+  const now = new Date(d);
+  return new Date(now.getTime() + now.getTimezoneOffset() * 60000);
+}
 
 export function getTodayStr() {
-  const d = new Date();
-  const year = d.getUTCFullYear();
-  const month = String(d.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(d.getUTCDate()).padStart(2, '0');
+  const d = getNowUTC();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 }
 
-export function formatHeaderDate(d = new Date()) {
+export function formatHeaderDate(d = getNowUTC()) {
   return new Intl.DateTimeFormat('en-US', {
-    timeZone: 'UTC',
     weekday: 'long',
     month: 'long',
     day: 'numeric',
-  }).format(new Date(d));
+  }).format(d);
 }

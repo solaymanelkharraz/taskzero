@@ -6,7 +6,7 @@ import { format } from 'date-fns'
 import { toast } from 'sonner'
 import { API_BASE } from '../lib/api'
 
-import { getTodayStr, formatHeaderDate } from '../lib/dateUtils'
+import { getTodayStr, formatHeaderDate, getNowUTC } from '../lib/dateUtils'
 
 export default function Today() {
   const navigate = useNavigate();
@@ -112,11 +112,11 @@ export default function Today() {
               {habits?.map(habit => {
                 const isDoneToday = habit.logs.includes(todayDate);
                 const past7Days = Array.from({ length: 7 }, (_, i) => {
-                  const d = new Date();
-                  d.setUTCDate(d.getUTCDate() - 6 + i);
-                  const year = d.getUTCFullYear();
-                  const month = String(d.getUTCMonth() + 1).padStart(2, '0');
-                  const day = String(d.getUTCDate()).padStart(2, '0');
+                  const d = getNowUTC();
+                  d.setDate(d.getDate() - 6 + i);
+                  const year = d.getFullYear();
+                  const month = String(d.getMonth() + 1).padStart(2, '0');
+                  const day = String(d.getDate()).padStart(2, '0');
                   return `${year}-${month}-${day}`;
                 });
 

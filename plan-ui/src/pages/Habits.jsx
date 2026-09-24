@@ -4,7 +4,7 @@ import { format, startOfMonth, endOfMonth, eachDayOfInterval, isBefore, isSameDa
 import { motion, AnimatePresence } from 'framer-motion'
 import { toast } from 'sonner'
 import { API_BASE } from '../lib/api'
-import { getTodayStr } from '../lib/dateUtils'
+import { getTodayStr, getNowUTC } from '../lib/dateUtils'
 
 export default function Habits() {
   const queryClient = useQueryClient();
@@ -41,7 +41,7 @@ export default function Habits() {
     }
   });
 
-  const today = new Date();
+  const today = getNowUTC();
   const monthStart = startOfMonth(today);
   const monthEnd = endOfMonth(today);
   const daysInMonth = eachDayOfInterval({ start: monthStart, end: monthEnd });

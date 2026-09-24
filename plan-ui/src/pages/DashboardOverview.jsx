@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { format, addDays, isBefore, startOfDay, eachDayOfInterval, subDays, isSameDay } from 'date-fns'
 import { API_BASE } from '../lib/api'
-import { getTodayStr } from '../lib/dateUtils'
+import { getTodayStr, getNowUTC } from '../lib/dateUtils'
 
 export default function DashboardOverview() {
   const { data: tasks } = useQuery({ 
@@ -14,7 +14,7 @@ export default function DashboardOverview() {
     queryFn: () => fetch(`${API_BASE}/projects`).then(res => res.json())
   });
 
-  const today = startOfDay(new Date());
+  const today = startOfDay(getNowUTC());
   const upcomingDays = Array.from({ length: 7 }, (_, i) => addDays(today, i));
 
   // Stats logic

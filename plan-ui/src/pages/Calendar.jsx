@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { API_BASE } from '../lib/api'
+import { getNowUTC } from '../lib/dateUtils'
 import { motion, AnimatePresence } from 'framer-motion'
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDay, isSameDay, addMonths, subMonths } from 'date-fns'
 
@@ -42,9 +43,9 @@ export default function Calendar() {
     }
   });
 
-  const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [currentMonth, setCurrentMonth] = useState(getNowUTC());
 
-  const today = new Date();
+  const today = getNowUTC();
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(currentMonth);
   const days = eachDayOfInterval({ start: monthStart, end: monthEnd });
@@ -67,7 +68,7 @@ export default function Calendar() {
             <button onClick={() => setCurrentMonth(subMonths(currentMonth, 1))} className="text-slate-400 hover:text-white px-2 py-1 bg-slate-800 rounded">←</button>
             <p className="text-slate-200 font-bold w-32 text-center">{format(currentMonth, 'MMMM yyyy')}</p>
             <button onClick={() => setCurrentMonth(addMonths(currentMonth, 1))} className="text-slate-400 hover:text-white px-2 py-1 bg-slate-800 rounded">→</button>
-            <button onClick={() => setCurrentMonth(new Date())} className="text-xs text-slate-500 hover:text-white ml-2">Today</button>
+            <button onClick={() => setCurrentMonth(getNowUTC())} className="text-xs text-slate-500 hover:text-white ml-2">Today</button>
           </div>
         </div>
       </div>
