@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { format, addDays, isBefore, startOfDay, eachDayOfInterval, subDays, isSameDay } from 'date-fns'
 import { API_BASE } from '../lib/api'
+import { getTodayStr } from '../lib/dateUtils'
 
 export default function DashboardOverview() {
   const { data: tasks } = useQuery({ 
@@ -23,7 +24,7 @@ export default function DashboardOverview() {
   const completionPct = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
 
   // Focus Score: % of tasks assigned to today that are done
-  const todayDate = format(today, 'yyyy-MM-dd');
+  const todayDate = getTodayStr();
   const tasksAssignedToday = tasks?.filter(t => t.assigned_date === todayDate) || [];
   const doneToday = tasksAssignedToday.filter(t => t.status === 'done').length;
   const focusScore = tasksAssignedToday.length > 0 ? Math.round((doneToday / tasksAssignedToday.length) * 100) : 0;

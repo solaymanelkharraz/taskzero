@@ -6,6 +6,8 @@ import { format } from 'date-fns'
 import { toast } from 'sonner'
 import { API_BASE } from '../lib/api'
 
+import { getTodayStr, formatHeaderDate } from '../lib/dateUtils'
+
 export default function Today() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -21,7 +23,7 @@ export default function Today() {
     queryFn: () => fetch(`${API_BASE}/habits`).then(res => res.json()) 
   });
 
-  const todayDate = format(new Date(), 'yyyy-MM-dd');
+  const todayDate = getTodayStr();
   const todayTasks = tasks?.filter(t => t.assigned_date === todayDate && t.status !== 'done') || [];
 
   const completeTask = useMutation({
@@ -95,7 +97,7 @@ export default function Today() {
         {/* Header */}
         <div className="text-center space-y-4">
           <h1 className="text-5xl font-black tracking-tight text-white">
-            {format(new Date(), 'EEEE, MMMM do')}
+            {formatHeaderDate()}
           </h1>
           <p className="text-xl text-slate-400">Action Center</p>
         </div>
@@ -111,8 +113,11 @@ export default function Today() {
                 const isDoneToday = habit.logs.includes(todayDate);
                 const past7Days = Array.from({ length: 7 }, (_, i) => {
                   const d = new Date();
-                  d.setDate(d.getDate() - 6 + i);
-                  return format(d, 'yyyy-MM-dd');
+                  d.setUTCDate(d.getUTCDate() - 6 + i);
+                  const year = d.getUTCFullYear();
+                  const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+                  const day = String(d.getUTCDate()).padStart(2, '0');
+                  return `${year}-${month}-${day}`;
                 });
 
                 return (

@@ -4,6 +4,7 @@ import { format, startOfMonth, endOfMonth, eachDayOfInterval, isBefore, isSameDa
 import { motion, AnimatePresence } from 'framer-motion'
 import { toast } from 'sonner'
 import { API_BASE } from '../lib/api'
+import { getTodayStr } from '../lib/dateUtils'
 
 export default function Habits() {
   const queryClient = useQueryClient();
@@ -16,7 +17,7 @@ export default function Habits() {
     mutationFn: (id) => fetch(`${API_BASE}/habits/${id}/log`, { 
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ date: format(new Date(), 'yyyy-MM-dd') })
+      body: JSON.stringify({ date: getTodayStr() })
     }).then(res => res.json()),
     onSuccess: () => {
       toast.success('Progress tracked!');
@@ -104,7 +105,7 @@ export default function Habits() {
 
       <div className="space-y-12">
         {habits?.map(habit => {
-          const isDoneToday = habit.logs.includes(format(today, 'yyyy-MM-dd'));
+          const isDoneToday = habit.logs.includes(getTodayStr());
 
           return (
             <div key={habit.id} className="bg-slate-800 rounded-2xl p-8 shadow-xl border border-slate-700">

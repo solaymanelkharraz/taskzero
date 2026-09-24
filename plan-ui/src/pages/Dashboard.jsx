@@ -5,6 +5,7 @@ import { format } from 'date-fns'
 import { toast } from 'sonner'
 import { Link, useNavigate } from 'react-router-dom'
 import { API_BASE } from '../lib/api'
+import { getTodayStr } from '../lib/dateUtils'
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -263,7 +264,7 @@ export default function Dashboard() {
                             {task.project_name || 'Standalone'}
                           </span>
                           {task.assigned_date ? (
-                            <span className={`font-bold ${task.assigned_date < format(new Date(), 'yyyy-MM-dd') ? 'text-red-400' : 'text-slate-500'}`}>
+                            <span className={`font-bold ${task.assigned_date < getTodayStr() ? 'text-red-400' : 'text-slate-500'}`}>
                               📅 {task.assigned_date}
                             </span>
                           ) : (
@@ -273,13 +274,13 @@ export default function Dashboard() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">
-                      {task.assigned_date !== format(new Date(), 'yyyy-MM-dd') && (
+                      {task.assigned_date !== getTodayStr() && (
                         <button 
                           onClick={() => {
                             fetch(`${API_BASE}/tasks/${task.id}`, {
                               method: 'PUT',
                               headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ assigned_date: format(new Date(), 'yyyy-MM-dd') })
+                              body: JSON.stringify({ assigned_date: getTodayStr() })
                             }).then(() => {
                               toast.success('Task moved to Today.');
                               queryClient.invalidateQueries({ queryKey: ['tasks'] });
